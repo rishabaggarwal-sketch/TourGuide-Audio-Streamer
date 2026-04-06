@@ -410,8 +410,8 @@
     </div>
 
     <script>
-        // --- Web Audio API Low-Latency Player ---
-        const WS_URL = 'ws://' + window.location.hostname + ':8765';
+        // --- Web Audio API Low-Latency Player (v2) ---
+        const WS_URL = 'ws://' + window.location.hostname + '/ws';
         const streamDot = document.getElementById('streamDot');
         const streamStatus = document.getElementById('streamStatus');
         const playRing = document.getElementById('playRing');
@@ -429,13 +429,17 @@
         let gainNode = null;
         let ws = null;
         let isPlaying = false;
-        let sampleRate = 16000;
+        let srcSampleRate = 16000;
         let channels = 1;
         let wsConnected = false;
 
         // Buffer management for smooth playback
         let nextPlayTime = 0;
         const BUFFER_DURATION = 0.05; // 50ms scheduling ahead
+        const MAX_LATENCY = 0.4; // Drop audio if more than 400ms behind
+        let audioChunks = []; // Accumulate small chunks before playing
+        let pendingBytes = 0;
+        const MIN_BUFFER_BYTES = 1600; // Accumulate ~50ms before scheduling
 
         // --- WebSocket Connection ---
         function connectWS() {
@@ -455,39 +459,62 @@
             ws.onmessage = (event) => {
                 if (typeof event.data === 'string') {
                     // JSON config message
-                    const config = JSON.parse(event.data);
-                    if (config.type === 'config') {
-                        sampleRate = config.sampleRate;
-                        channels = config.channels;
-                    }
+                    try {
+                        const config = JSON.parse(event.data);
+                        if (config.type === 'config') {
+                            srcSampleRate = config.sampleRate;
+                            channels = config.channels;
+                        }
+                    } catch(e) {}
                     return;
                 }
 
                 // Binary audio data
                 if (!isPlaying || !audioCtx) return;
 
-                // Convert raw PCM (signed 16-bit LE) to Float32 for Web Audio
-                const int16 = new Int16Array(event.data);
-                const float32 = new Float32Array(int16.length);
-                for (let i = 0; i < int16.length; i++) {
-                    float32[i] = int16[i] / 32768.0;
+
+                // Accumulate small chunks into larger buffer for smoother playback
+                audioChunks.push(new Int16Array(event.data));
+                pendingBytes += event.data.byteLength;
+
+                if (pendingBytes < MIN_BUFFER_BYTES) return;
+
+                // Merge accumulated chunks
+                let totalSamples = 0;
+                for (const chunk of audioChunks) totalSamples += chunk.length;
+                const merged = new Float32Array(totalSamples);
+                let offset = 0;
+                for (const chunk of audioChunks) {
+                    for (let i = 0; i < chunk.length; i++) {
+                        merged[offset++] = chunk[i] / 32768.0;
+                    }
                 }
+                audioChunks = [];
+                pendingBytes = 0;
 
                 // Create audio buffer and schedule for playback
-                const buffer = audioCtx.createBuffer(1, float32.length, sampleRate);
-                buffer.getChannelData(0).set(float32);
+                try {
+                    const buffer = audioCtx.createBuffer(1, merged.length, srcSampleRate);
+                    buffer.getChannelData(0).set(merged);
 
-                const source = audioCtx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(gainNode);
+                    const now = audioCtx.currentTime;
 
-                // Schedule playback with minimal buffering
-                const now = audioCtx.currentTime;
-                if (nextPlayTime < now) {
-                    nextPlayTime = now + BUFFER_DURATION;
+                    // If we've fallen too far behind, skip ahead to stay real-time
+                    if (nextPlayTime > now + MAX_LATENCY) {
+                        nextPlayTime = now + BUFFER_DURATION;
+                    }
+                    if (nextPlayTime < now) {
+                        nextPlayTime = now + BUFFER_DURATION;
+                    }
+
+                    const source = audioCtx.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(gainNode);
+                    source.start(nextPlayTime);
+                    nextPlayTime += buffer.duration;
+                } catch(e) {
+                    console.error('Audio error:', e);
                 }
-                source.start(nextPlayTime);
-                nextPlayTime += buffer.duration;
             };
 
             ws.onclose = () => {
@@ -495,7 +522,6 @@
                 streamDot.classList.remove('live');
                 streamDot.classList.add('off');
                 streamStatus.textContent = 'Reconnecting...';
-                // Auto-reconnect after 2 seconds
                 setTimeout(connectWS, 2000);
             };
 
@@ -519,12 +545,18 @@
             // Create AudioContext on user gesture (required by browsers)
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-                    sampleRate: sampleRate,
                     latencyHint: 'interactive',
                 });
                 gainNode = audioCtx.createGain();
                 gainNode.gain.value = volumeSlider.value / 100;
                 gainNode.connect(audioCtx.destination);
+
+                // iOS Safari unlock: play a tiny silent buffer to unblock audio output
+                const unlock = audioCtx.createBuffer(1, 1, 22050);
+                const src = audioCtx.createBufferSource();
+                src.buffer = unlock;
+                src.connect(audioCtx.destination);
+                src.start(0);
             }
 
             if (audioCtx.state === 'suspended') {
@@ -532,6 +564,8 @@
             }
 
             nextPlayTime = 0;
+            audioChunks = [];
+            pendingBytes = 0;
             isPlaying = true;
             updateUI(true);
 
@@ -543,6 +577,8 @@
 
         function stopAudio() {
             isPlaying = false;
+            audioChunks = [];
+            pendingBytes = 0;
             updateUI(false);
         }
 
@@ -586,7 +622,7 @@
 
         // --- Status polling via WebSocket ---
         function pollStatus() {
-            const statusWs = new WebSocket('ws://' + window.location.hostname + ':8765/status');
+            const statusWs = new WebSocket('ws://' + window.location.hostname + '/ws/status');
             statusWs.onopen = () => {
                 statusWs.send(JSON.stringify({action: 'status'}));
             };

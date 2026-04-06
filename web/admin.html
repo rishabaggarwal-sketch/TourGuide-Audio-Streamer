@@ -265,7 +265,7 @@
 
     <script>
         // --- WebSocket API helper ---
-        const WS_STATUS_URL = 'ws://' + window.location.hostname + ':8765/status';
+        const WS_STATUS_URL = 'ws://' + window.location.hostname + '/ws/status';
 
         function wsRequest(action, extra) {
             return new Promise((resolve, reject) => {

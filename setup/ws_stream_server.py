@@ -74,36 +74,41 @@ async def audio_producer():
     print(f"[OK] Starting audio capture...")
     print(f"[OK] Recording to: {rec_path}")
 
-    ffmpeg_process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    is_streaming = True
-    print(f"[OK] WebSocket streaming on port {WS_PORT}")
+    while True:
+        ffmpeg_process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        is_streaming = True
+        print(f"[OK] WebSocket streaming on port {WS_PORT}", flush=True)
 
-    try:
-        while True:
-            data = await ffmpeg_process.stdout.read(CHUNK_SIZE)
-            if not data:
-                break
+        chunks = 0
+        try:
+            while True:
+                data = await ffmpeg_process.stdout.read(CHUNK_SIZE)
+                if not data:
+                    break
+                chunks += 1
+                if chunks == 1:
+                    print(f"[OK] First audio chunk: {len(data)} bytes", flush=True)
 
-            # Broadcast to all connected clients
-            if clients:
-                dead = set()
-                for ws in clients:
-                    try:
-                        await ws.send(data)
-                    except websockets.exceptions.ConnectionClosed:
-                        dead.add(ws)
-                clients -= dead
-    except asyncio.CancelledError:
-        pass
-    finally:
-        is_streaming = False
-        if ffmpeg_process:
-            ffmpeg_process.terminate()
-            await ffmpeg_process.wait()
+                # Broadcast to all connected clients
+                if clients:
+                    websockets.broadcast(clients, data)
+        except asyncio.CancelledError:
+            is_streaming = False
+            if ffmpeg_process:
+                ffmpeg_process.terminate()
+                await ffmpeg_process.wait()
+            return
+        finally:
+            is_streaming = False
+
+        # FFmpeg exited - retry
+        retcode = ffmpeg_process.returncode
+        print(f"[WARN] FFmpeg exited with code {retcode}, restarting in 3s...", flush=True)
+        await asyncio.sleep(3)
 
 
 async def handle_client(websocket):
