@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    .card {
+        width: 300px;
+        border: 2px solid #333;
+        border-radius: 12px;
+        padding: 24px;
+        text-align: center;
+        margin: 0 auto;
+    }
+    .card h1 { font-size: 22px; margin: 0 0 4px; }
+    .card .divider { border-top: 1px solid #ccc; margin: 12px 0; }
+    .card .step { font-size: 14px; text-align: left; margin: 8px 0; color: #333; }
+    .card .step b { color: #000; }
+    .card img { width: 180px; height: 180px; margin: 12px 0; }
+    .card .footer { font-size: 12px; color: #666; margin-top: 12px; }
+    @media print {
+        .card { break-inside: avoid; }
+        .no-print { display: none; }
+    }
+</style>
+</head>
+<body>
+    <p class="no-print" style="text-align:center; color:#666;">Print this page and laminate the cards for reuse.</p>
+
+    <!-- Visitor Card -->
+    <div class="card">
+        <h1>Audio Guide</h1>
+        <div class="subtitle">For Visitors</div>
+        <div class="divider"></div>
+        <div class="step"><b>1.</b> Connect to WiFi:<br>&nbsp;&nbsp;&nbsp;&nbsp;Name: <b>TourGuide</b><br>&nbsp;&nbsp;&nbsp;&nbsp;Password: <b>listen123</b></div>
+        <div class="step"><b>2.</b> Scan this QR code:</div>
+        <img src="qr_tourguide.png" alt="Visitor QR Code">
+        <div class="step"><b>3.</b> Plug in headphones and tap <b>Play</b></div>
+        <div class="divider"></div>
+        <div class="footer">Enjoy the tour!</div>
+    </div>
+
+    <div style="height: 40px;"></div>
+
+    <!-- Admin Card -->
+    <div class="card" style="border-color: #1a6b3f;">
+        <h1>Guide Admin Panel</h1>
+        <div class="subtitle" style="color: #1a6b3f;">For Guide Only</div>
+        <div class="divider"></div>
+        <div class="step"><b>1.</b> Connect to WiFi:<br>&nbsp;&nbsp;&nbsp;&nbsp;Name: <b>TourGuide</b><br>&nbsp;&nbsp;&nbsp;&nbsp;Password: <b>listen123</b></div>
+        <div class="step"><b>2.</b> Scan this QR code:</div>
+        <img src="qr_admin.png" alt="Admin QR Code">
+        <div class="divider"></div>
+        <div class="step" style="text-align: center; font-size: 12px; color: #666;">
+            Stream status | Listener count<br>
+            Recordings | Disk space
+        </div>
+        <div class="divider"></div>
+        <div class="footer">http://192.168.4.1/admin.html</div>
+    </div>
+</body>
+</html>

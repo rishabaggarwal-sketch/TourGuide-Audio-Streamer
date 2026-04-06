@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tour Guide - Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0e1a;
+            color: #e0e0e0;
+            min-height: 100vh;
+            padding-bottom: 2rem;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1a1f35, #0d1225);
+            padding: 1.2rem 1rem;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .header h1 { font-size: 1.1rem; color: #fff; }
+        .header .sub { font-size: 0.75rem; color: #6b7394; margin-top: 0.2rem; }
+
+        .section { padding: 1rem; }
+        .section-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #6b7394;
+            margin-bottom: 0.8rem;
+            padding-left: 0.2rem;
+        }
+
+        /* --- Status Cards --- */
+        .status-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.7rem;
+            margin-bottom: 0.5rem;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        .stat-value.green { color: #4ade80; }
+        .stat-value.red { color: #ef4444; }
+        .stat-label {
+            font-size: 0.7rem;
+            color: #6b7394;
+            margin-top: 0.3rem;
+        }
+
+        /* --- Stream Control --- */
+        .stream-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .stream-info { flex: 1; }
+        .stream-info .label { font-size: 0.8rem; color: #6b7394; }
+        .stream-info .value { font-size: 0.95rem; color: #fff; margin-top: 0.2rem; }
+        .stream-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            display: inline-block;
+        }
+        .stream-dot.on { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.5); }
+        .stream-dot.off { background: #ef4444; }
+
+        /* --- Recording Section --- */
+        .recording-current {
+            background: rgba(74,222,128,0.05);
+            border: 1px solid rgba(74,222,128,0.15);
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 0.8rem;
+        }
+        .recording-current .rec-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+            animation: pulse 1s infinite;
+            margin-right: 0.4rem;
+        }
+        .recording-current .label {
+            font-size: 0.8rem;
+            color: #4ade80;
+        }
+        .recording-current .filename {
+            font-size: 0.85rem;
+            color: #fff;
+            margin-top: 0.3rem;
+            font-family: monospace;
+        }
+
+        /* --- Recordings List --- */
+        .rec-list { list-style: none; }
+        .rec-item {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 8px;
+            padding: 0.8rem 1rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .rec-meta { flex: 1; }
+        .rec-name {
+            font-size: 0.8rem;
+            color: #fff;
+            font-family: monospace;
+        }
+        .rec-details {
+            font-size: 0.7rem;
+            color: #6b7394;
+            margin-top: 0.2rem;
+        }
+        .rec-actions { display: flex; gap: 0.4rem; }
+        .btn-sm {
+            padding: 0.4rem 0.7rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .btn-download {
+            background: rgba(74,222,128,0.15);
+            color: #4ade80;
+        }
+        .btn-delete {
+            background: rgba(239,68,68,0.1);
+            color: #fca5a5;
+        }
+        .btn-delete:active { background: rgba(239,68,68,0.3); }
+
+        .btn-full {
+            width: 100%;
+            padding: 0.8rem;
+            border: 1px solid rgba(239,68,68,0.2);
+            background: rgba(239,68,68,0.05);
+            color: #fca5a5;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            margin-top: 0.5rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7394;
+            font-size: 0.85rem;
+        }
+
+        /* --- QR Section --- */
+        .qr-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 10px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .qr-card img {
+            max-width: 200px;
+            border-radius: 8px;
+            background: #fff;
+            padding: 8px;
+        }
+        .qr-url {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #4ade80;
+            margin-top: 0.8rem;
+        }
+        .qr-hint {
+            font-size: 0.75rem;
+            color: #6b7394;
+            margin-top: 0.5rem;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Guide Admin Panel</h1>
+        <div class="sub">Stream control & recordings</div>
+    </div>
+
+    <!-- Status Overview -->
+    <div class="section">
+        <div class="section-title">Live Status</div>
+        <div class="status-grid">
+            <div class="stat-card">
+                <div class="stat-value green" id="listenerCount">--</div>
+                <div class="stat-label">Listeners</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="diskFree">--</div>
+                <div class="stat-label">GB Free</div>
+            </div>
+        </div>
+        <div class="stream-card" style="margin-top: 0.7rem;">
+            <div class="stream-info">
+                <div class="label">Stream</div>
+                <div class="value">
+                    <span class="stream-dot" id="streamDot"></span>
+                    <span id="streamLabel">Checking...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Current Recording -->
+    <div class="section">
+        <div class="section-title">Current Recording</div>
+        <div id="currentRecording">
+            <div class="empty-state">Checking...</div>
+        </div>
+    </div>
+
+    <!-- QR Code -->
+    <div class="section">
+        <div class="section-title">Visitor QR Code</div>
+        <div class="qr-card">
+            <img src="/qr.png" alt="QR Code" onerror="this.style.display='none'">
+            <div class="qr-url">http://192.168.4.1/</div>
+            <div class="qr-hint">Print this QR code for visitors to scan</div>
+        </div>
+    </div>
+
+    <!-- Past Recordings -->
+    <div class="section">
+        <div class="section-title">Past Recordings</div>
+        <ul class="rec-list" id="recordingsList">
+            <li class="empty-state">Loading...</li>
+        </ul>
+        <button class="btn-full" onclick="cleanupOld()">
+            Delete recordings older than 30 days
+        </button>
+    </div>
+
+    <script>
+        // --- Fetch Status ---
+        function fetchStatus() {
+            // Stream status + listeners
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    const dot = document.getElementById('streamDot');
+                    const label = document.getElementById('streamLabel');
+                    const count = document.getElementById('listenerCount');
+
+                    if (data.streaming) {
+                        dot.classList.add('on');
+                        dot.classList.remove('off');
+                        label.textContent = 'LIVE';
+                    } else {
+                        dot.classList.remove('on');
+                        dot.classList.add('off');
+                        label.textContent = 'Offline';
+                    }
+
+                    count.textContent = data.listeners;
+                    count.className = 'stat-value ' + (data.listeners > 0 ? 'green' : '');
+
+                    // Current recording
+                    const recEl = document.getElementById('currentRecording');
+                    if (data.current_recording && data.streaming) {
+                        recEl.innerHTML = `
+                            <div class="recording-current">
+                                <div class="label"><span class="rec-dot"></span> Recording</div>
+                                <div class="filename">${data.current_recording}</div>
+                            </div>`;
+                    } else {
+                        recEl.innerHTML = '<div class="empty-state">Not recording</div>';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('streamLabel').textContent = 'Error';
+                });
+
+            // Disk info
+            fetch('/api/disk')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('diskFree').textContent = data.free_gb;
+                })
+                .catch(() => {});
+        }
+
+        // --- Fetch Recordings ---
+        function fetchRecordings() {
+            fetch('/api/recordings')
+                .then(r => r.json())
+                .then(data => {
+                    const list = document.getElementById('recordingsList');
+                    if (!data.recordings || data.recordings.length === 0) {
+                        list.innerHTML = '<li class="empty-state">No recordings yet</li>';
+                        return;
+                    }
+                    list.innerHTML = data.recordings.map(rec => {
+                        const date = new Date(rec.created).toLocaleString();
+                        const duration = rec.duration_min ? rec.duration_min + ' min' : '...';
+                        return `
+                            <li class="rec-item">
+                                <div class="rec-meta">
+                                    <div class="rec-name">${rec.filename}</div>
+                                    <div class="rec-details">${date} | ${duration} | ${rec.size_mb} MB</div>
+                                </div>
+                                <div class="rec-actions">
+                                    <a href="${rec.download_url}" download class="btn-sm btn-download">Download</a>
+                                    <button class="btn-sm btn-delete" onclick="deleteRec('${rec.filename}')">Delete</button>
+                                </div>
+                            </li>`;
+                    }).join('');
+                })
+                .catch(() => {
+                    document.getElementById('recordingsList').innerHTML =
+                        '<li class="empty-state">Could not load recordings</li>';
+                });
+        }
+
+        // --- Delete Recording ---
+        function deleteRec(filename) {
+            if (!confirm('Delete ' + filename + '?')) return;
+            fetch('/api/recordings/delete?file=' + encodeURIComponent(filename))
+                .then(r => r.json())
+                .then(() => fetchRecordings())
+                .catch(err => alert('Delete failed: ' + err));
+        }
+
+        // --- Cleanup Old ---
+        function cleanupOld() {
+            if (!confirm('Delete all recordings older than 30 days?')) return;
+            fetch('/api/cleanup?days=30')
+                .then(r => r.json())
+                .then(data => {
+                    alert('Deleted ' + data.count + ' old recording(s)');
+                    fetchRecordings();
+                })
+                .catch(err => alert('Cleanup failed: ' + err));
+        }
+
+        // --- Init ---
+        fetchStatus();
+        fetchRecordings();
+        setInterval(fetchStatus, 5000);
+        setInterval(fetchRecordings, 30000);
+    </script>
+</body>
+</html>
