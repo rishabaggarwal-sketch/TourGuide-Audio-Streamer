@@ -9,6 +9,7 @@ Captures audio from USB sound card and streams via:
 
 import asyncio
 import subprocess
+import struct
 import signal
 import sys
 import json
@@ -37,7 +38,10 @@ USB_CARD = None
 # --- Global state ---
 clients = set()
 is_streaming = False
+is_recording = False
 current_recording = None
+rec_file = None
+pcm_bytes_written = 0
 ffmpeg_capture = None
 ffmpeg_hls = None
 
@@ -57,18 +61,71 @@ def detect_usb_card():
     return 2
 
 
+def _finalize_wav(f, data_size):
+    """Patch WAV header with actual data size."""
+    try:
+        f.seek(4)
+        f.write(struct.pack('<I', data_size + 36))  # RIFF chunk size
+        f.seek(40)
+        f.write(struct.pack('<I', data_size))  # data chunk size
+    except Exception:
+        pass
+
+
+def start_recording():
+    """Start recording audio to a WAV file."""
+    global is_recording, current_recording, rec_file, pcm_bytes_written
+
+    if is_recording:
+        return current_recording
+
+    os.makedirs(RECORDINGS_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    current_recording = f"tour_{timestamp}.wav"
+    rec_path = os.path.join(RECORDINGS_DIR, current_recording)
+
+    rec_file = open(rec_path, 'wb')
+    byte_rate = SAMPLE_RATE * CHANNELS * 2
+    block_align = CHANNELS * 2
+    rec_file.write(struct.pack('<4sI4s', b'RIFF', 0, b'WAVE'))
+    rec_file.write(struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, CHANNELS,
+                               SAMPLE_RATE, byte_rate, block_align, 16))
+    rec_file.write(struct.pack('<4sI', b'data', 0))
+    pcm_bytes_written = 0
+    is_recording = True
+
+    print(f"[OK] Recording started: {current_recording}", flush=True)
+    return current_recording
+
+
+def stop_recording():
+    """Stop recording and finalize the WAV file."""
+    global is_recording, rec_file, pcm_bytes_written, current_recording
+
+    if not is_recording or rec_file is None:
+        return None
+
+    _finalize_wav(rec_file, pcm_bytes_written)
+    rec_file.close()
+    rec_file = None
+    is_recording = False
+
+    saved = current_recording
+    size_mb = pcm_bytes_written / (1024 * 1024)
+    print(f"[OK] Recording saved: {saved} ({size_mb:.1f} MB)", flush=True)
+    current_recording = None
+    return saved
+
+
 async def audio_producer():
     """Capture audio from USB and broadcast PCM to WebSocket + feed HLS encoder."""
-    global is_streaming, ffmpeg_capture, ffmpeg_hls, current_recording
+    global is_streaming, ffmpeg_capture, ffmpeg_hls, pcm_bytes_written
 
     USB_CARD = detect_usb_card()
     print(f"[OK] USB sound card: card {USB_CARD}")
 
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
     os.makedirs(HLS_DIR, exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    current_recording = f"tour_{timestamp}.wav"
 
     # FFmpeg #1: ALSA capture -> raw PCM stdout
     capture_cmd = [
@@ -140,8 +197,14 @@ async def audio_producer():
                 except (BrokenPipeError, ConnectionResetError):
                     break
 
+                # Write to recording file if recording is active
+                if is_recording and rec_file:
+                    rec_file.write(data)
+                    pcm_bytes_written += len(data)
+
         except asyncio.CancelledError:
             is_streaming = False
+            stop_recording()
             for proc in [ffmpeg_capture, ffmpeg_hls]:
                 if proc:
                     proc.terminate()
@@ -223,10 +286,23 @@ async def status_handler(websocket):
                 if action == "status":
                     resp = {
                         "streaming": is_streaming,
+                        "recording": is_recording,
                         "listeners": len(clients),
                         "current_recording": current_recording,
                     }
                     await websocket.send(json.dumps(resp))
+
+                elif action == "start_rec":
+                    filename = start_recording()
+                    await websocket.send(json.dumps({
+                        "recording": True, "filename": filename
+                    }))
+
+                elif action == "stop_rec":
+                    saved = stop_recording()
+                    await websocket.send(json.dumps({
+                        "recording": False, "saved": saved
+                    }))
 
                 elif action == "disk":
                     stat = os.statvfs(RECORDINGS_DIR)

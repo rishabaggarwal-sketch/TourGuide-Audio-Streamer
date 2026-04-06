@@ -110,6 +110,29 @@
             font-family: monospace;
         }
 
+        .btn-record {
+            width: 100%;
+            padding: 0.9rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 0.8rem;
+            transition: all 0.2s;
+        }
+        .btn-record.start {
+            background: rgba(239,68,68,0.15);
+            color: #ef4444;
+            border: 1px solid rgba(239,68,68,0.3);
+        }
+        .btn-record.stop {
+            background: rgba(239,68,68,0.3);
+            color: #fff;
+            border: 1px solid rgba(239,68,68,0.5);
+            animation: pulse 1.5s infinite;
+        }
+
         /* --- Recordings List --- */
         .rec-list { list-style: none; }
         .rec-item {
@@ -208,6 +231,7 @@
     <div class="header">
         <h1>Guide Admin Panel</h1>
         <div class="sub">Stream control & recordings</div>
+        <div class="sub" style="margin-top: 0.3rem; font-size: 0.6rem;">Developed by Admin: Rishab Aggarwal (DPM PC-K)</div>
     </div>
 
     <!-- Status Overview -->
@@ -234,11 +258,14 @@
         </div>
     </div>
 
-    <!-- Current Recording -->
+    <!-- Recording Control -->
     <div class="section">
-        <div class="section-title">Current Recording</div>
+        <div class="section-title">Recording</div>
+        <button class="btn-record start" id="recordBtn" onclick="toggleRecording()">
+            Start Recording
+        </button>
         <div id="currentRecording">
-            <div class="empty-state">Checking...</div>
+            <div class="empty-state">Not recording</div>
         </div>
     </div>
 
@@ -277,6 +304,54 @@
             });
         }
 
+        let currentlyRecording = false;
+
+        // --- Toggle Recording ---
+        function toggleRecording() {
+            const btn = document.getElementById('recordBtn');
+            if (currentlyRecording) {
+                btn.disabled = true;
+                btn.textContent = 'Stopping...';
+                wsRequest('stop_rec').then(data => {
+                    currentlyRecording = false;
+                    updateRecordingUI(false, null);
+                    if (data.saved) {
+                        fetchRecordings();
+                    }
+                }).catch(() => {
+                    btn.disabled = false;
+                });
+            } else {
+                btn.disabled = true;
+                btn.textContent = 'Starting...';
+                wsRequest('start_rec').then(data => {
+                    currentlyRecording = true;
+                    updateRecordingUI(true, data.filename);
+                }).catch(() => {
+                    btn.disabled = false;
+                });
+            }
+        }
+
+        function updateRecordingUI(recording, filename) {
+            const btn = document.getElementById('recordBtn');
+            const recEl = document.getElementById('currentRecording');
+            btn.disabled = false;
+            if (recording) {
+                btn.className = 'btn-record stop';
+                btn.textContent = 'Stop Recording';
+                recEl.innerHTML = `
+                    <div class="recording-current">
+                        <div class="label"><span class="rec-dot"></span> Recording</div>
+                        <div class="filename">${filename}</div>
+                    </div>`;
+            } else {
+                btn.className = 'btn-record start';
+                btn.textContent = 'Start Recording';
+                recEl.innerHTML = '<div class="empty-state">Not recording</div>';
+            }
+        }
+
         // --- Fetch Status ---
         function fetchStatus() {
             wsRequest('status').then(data => {
@@ -297,15 +372,10 @@
                 count.textContent = data.listeners;
                 count.className = 'stat-value ' + (data.listeners > 0 ? 'green' : '');
 
-                const recEl = document.getElementById('currentRecording');
-                if (data.current_recording && data.streaming) {
-                    recEl.innerHTML = `
-                        <div class="recording-current">
-                            <div class="label"><span class="rec-dot"></span> Recording</div>
-                            <div class="filename">${data.current_recording}</div>
-                        </div>`;
-                } else {
-                    recEl.innerHTML = '<div class="empty-state">Not recording</div>';
+                // Sync recording state from server
+                if (data.recording !== currentlyRecording) {
+                    currentlyRecording = data.recording;
+                    updateRecordingUI(data.recording, data.current_recording);
                 }
             }).catch(() => {
                 document.getElementById('streamLabel').textContent = 'Error';
