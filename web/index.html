@@ -118,6 +118,20 @@
         }
         .player-status.live { color: #4ade80; }
 
+        /* --- Latency Badge --- */
+        .latency-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            background: rgba(74,222,128,0.1);
+            color: #4ade80;
+            padding: 0.3rem 0.7rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 500;
+            margin-top: 0.5rem;
+        }
+
         /* --- Volume --- */
         .volume-section {
             padding: 0 2rem 1.5rem;
@@ -253,7 +267,7 @@
             border-radius: 20px;
             font-size: 0.75rem;
             font-weight: 500;
-            margin-top: 1rem;
+            margin-top: 0.5rem;
         }
 
         /* --- Error State --- */
@@ -282,10 +296,10 @@
     <div class="status-bar">
         <div class="status-item">
             <div class="status-dot" id="streamDot"></div>
-            <span id="streamStatus">Checking...</span>
+            <span id="streamStatus">Connecting...</span>
         </div>
         <div class="status-item">
-            <div class="status-dot" id="wifiDot"></div>
+            <div class="status-dot live" id="wifiDot"></div>
             <span>WiFi Connected</span>
         </div>
     </div>
@@ -318,6 +332,10 @@
                 <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
             </svg>
             <span id="listenerCount">0</span> listening
+        </div>
+
+        <div class="latency-badge" id="latencyBadge" style="display:none">
+            Low latency mode
         </div>
     </div>
 
@@ -361,7 +379,6 @@
     <!-- Tab: Map -->
     <div class="tab-content" id="tab-map">
         <div class="map-container">
-            <!-- Replace with actual map image: <img src="/map.jpg" alt="Tour Map"> -->
             <div class="map-placeholder" id="mapArea">
                 Tour map will be displayed here.<br><br>
                 To add a map, place a <strong>map.jpg</strong> file<br>
@@ -392,53 +409,144 @@
         </div>
     </div>
 
-    <!-- Hidden audio element -->
-    <audio id="audioPlayer" preload="none">
-        <source src="/listen" type="audio/ogg">
-    </audio>
-
     <script>
-        const audio = document.getElementById('audioPlayer');
+        // --- Web Audio API Low-Latency Player ---
+        const WS_URL = 'ws://' + window.location.hostname + ':8765';
+        const streamDot = document.getElementById('streamDot');
+        const streamStatus = document.getElementById('streamStatus');
         const playRing = document.getElementById('playRing');
         const playBtn = document.getElementById('playBtn');
         const playIcon = document.getElementById('playIcon');
         const pauseIcon = document.getElementById('pauseIcon');
         const playerStatus = document.getElementById('playerStatus');
-        const streamDot = document.getElementById('streamDot');
-        const streamStatus = document.getElementById('streamStatus');
-        const wifiDot = document.getElementById('wifiDot');
         const listenersBadge = document.getElementById('listenersBadge');
         const listenerCount = document.getElementById('listenerCount');
+        const latencyBadge = document.getElementById('latencyBadge');
         const errorBanner = document.getElementById('errorBanner');
         const volumeSlider = document.getElementById('volumeSlider');
 
+        let audioCtx = null;
+        let gainNode = null;
+        let ws = null;
         let isPlaying = false;
+        let sampleRate = 16000;
+        let channels = 1;
+        let wsConnected = false;
+
+        // Buffer management for smooth playback
+        let nextPlayTime = 0;
+        const BUFFER_DURATION = 0.05; // 50ms scheduling ahead
+
+        // --- WebSocket Connection ---
+        function connectWS() {
+            if (ws && ws.readyState <= 1) return;
+
+            ws = new WebSocket(WS_URL);
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                wsConnected = true;
+                streamDot.classList.add('live');
+                streamDot.classList.remove('off');
+                streamStatus.textContent = 'Live';
+                errorBanner.style.display = 'none';
+            };
+
+            ws.onmessage = (event) => {
+                if (typeof event.data === 'string') {
+                    // JSON config message
+                    const config = JSON.parse(event.data);
+                    if (config.type === 'config') {
+                        sampleRate = config.sampleRate;
+                        channels = config.channels;
+                    }
+                    return;
+                }
+
+                // Binary audio data
+                if (!isPlaying || !audioCtx) return;
+
+                // Convert raw PCM (signed 16-bit LE) to Float32 for Web Audio
+                const int16 = new Int16Array(event.data);
+                const float32 = new Float32Array(int16.length);
+                for (let i = 0; i < int16.length; i++) {
+                    float32[i] = int16[i] / 32768.0;
+                }
+
+                // Create audio buffer and schedule for playback
+                const buffer = audioCtx.createBuffer(1, float32.length, sampleRate);
+                buffer.getChannelData(0).set(float32);
+
+                const source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(gainNode);
+
+                // Schedule playback with minimal buffering
+                const now = audioCtx.currentTime;
+                if (nextPlayTime < now) {
+                    nextPlayTime = now + BUFFER_DURATION;
+                }
+                source.start(nextPlayTime);
+                nextPlayTime += buffer.duration;
+            };
+
+            ws.onclose = () => {
+                wsConnected = false;
+                streamDot.classList.remove('live');
+                streamDot.classList.add('off');
+                streamStatus.textContent = 'Reconnecting...';
+                // Auto-reconnect after 2 seconds
+                setTimeout(connectWS, 2000);
+            };
+
+            ws.onerror = () => {
+                streamDot.classList.remove('live');
+                streamDot.classList.add('off');
+                streamStatus.textContent = 'Offline';
+            };
+        }
 
         // --- Audio Control ---
         function togglePlay() {
             if (isPlaying) {
-                audio.pause();
-                audio.src = '';
-                updateUI(false);
+                stopAudio();
             } else {
-                audio.src = '/listen';
-                audio.load();
-                const playPromise = audio.play();
-                if (playPromise) {
-                    playPromise.then(() => {
-                        updateUI(true);
-                    }).catch(err => {
-                        console.error('Play failed:', err);
-                        errorBanner.style.display = 'block';
-                        errorBanner.textContent = 'Could not start audio. Tap play again.';
-                        setTimeout(() => { errorBanner.style.display = 'none'; }, 5000);
-                    });
-                }
+                startAudio();
             }
         }
 
+        function startAudio() {
+            // Create AudioContext on user gesture (required by browsers)
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: sampleRate,
+                    latencyHint: 'interactive',
+                });
+                gainNode = audioCtx.createGain();
+                gainNode.gain.value = volumeSlider.value / 100;
+                gainNode.connect(audioCtx.destination);
+            }
+
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+
+            nextPlayTime = 0;
+            isPlaying = true;
+            updateUI(true);
+
+            // Connect WebSocket if not connected
+            if (!wsConnected) {
+                connectWS();
+            }
+        }
+
+        function stopAudio() {
+            isPlaying = false;
+            updateUI(false);
+        }
+
         function updateUI(playing) {
-            isPlaying = playing;
             if (playing) {
                 playRing.classList.add('playing');
                 playBtn.classList.add('playing');
@@ -446,6 +554,7 @@
                 pauseIcon.style.display = 'block';
                 playerStatus.textContent = 'Listening...';
                 playerStatus.classList.add('live');
+                latencyBadge.style.display = 'inline-flex';
             } else {
                 playRing.classList.remove('playing');
                 playBtn.classList.remove('playing');
@@ -453,34 +562,19 @@
                 pauseIcon.style.display = 'none';
                 playerStatus.textContent = 'Paused';
                 playerStatus.classList.remove('live');
+                latencyBadge.style.display = 'none';
             }
         }
 
         // --- Volume ---
         function setVolume(val) {
-            audio.volume = val / 100;
+            if (gainNode) {
+                gainNode.gain.value = val / 100;
+            }
             document.getElementById('volValue').textContent = val + '%';
             volumeSlider.style.setProperty('--val', val + '%');
         }
-        // Init volume
-        audio.volume = 0.8;
         volumeSlider.style.setProperty('--val', '80%');
-
-        // --- Audio Events ---
-        audio.addEventListener('playing', () => updateUI(true));
-        audio.addEventListener('pause', () => { if (!audio.seeking) updateUI(false); });
-        audio.addEventListener('error', () => {
-            updateUI(false);
-            playerStatus.textContent = 'Connection lost';
-            // Auto-retry after 3 seconds
-            setTimeout(() => {
-                if (!isPlaying) {
-                    audio.src = '/listen';
-                    audio.load();
-                    audio.play().catch(() => {});
-                }
-            }, 3000);
-        });
 
         // --- Tabs ---
         function switchTab(name) {
@@ -490,42 +584,24 @@
             document.getElementById('tab-' + name).classList.add('active');
         }
 
-        // --- Status Polling ---
-        function checkStatus() {
-            fetch('/status-json.xsl')
-                .then(r => r.json())
-                .then(data => {
-                    const source = data.icestats?.source;
-                    if (source) {
-                        streamDot.classList.add('live');
-                        streamDot.classList.remove('off');
-                        streamStatus.textContent = 'Live';
-                        errorBanner.style.display = 'none';
-
-                        // Listener count
-                        let count = 0;
-                        if (Array.isArray(source)) {
-                            count = source.reduce((a, s) => a + (s.listeners || 0), 0);
-                        } else {
-                            count = source.listeners || 0;
-                        }
-                        listenerCount.textContent = count;
-                        listenersBadge.style.display = count > 0 ? 'inline-flex' : 'none';
-                    } else {
-                        streamDot.classList.remove('live');
-                        streamDot.classList.add('off');
-                        streamStatus.textContent = 'Offline';
+        // --- Status polling via WebSocket ---
+        function pollStatus() {
+            const statusWs = new WebSocket('ws://' + window.location.hostname + ':8765/status');
+            statusWs.onopen = () => {
+                statusWs.send(JSON.stringify({action: 'status'}));
+            };
+            statusWs.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.listeners !== undefined) {
+                        listenerCount.textContent = data.listeners;
+                        listenersBadge.style.display = data.listeners > 0 ? 'inline-flex' : 'none';
                     }
-                })
-                .catch(() => {
-                    streamDot.classList.remove('live');
-                    streamDot.classList.add('off');
-                    streamStatus.textContent = 'Offline';
-                });
+                } catch(e) {}
+                statusWs.close();
+            };
+            statusWs.onerror = () => statusWs.close();
         }
-
-        // Check WiFi status
-        wifiDot.classList.add('live');
 
         // Check for map image
         fetch('/map.jpg', { method: 'HEAD' })
@@ -536,9 +612,11 @@
             })
             .catch(() => {});
 
+        // Start WebSocket connection immediately
+        connectWS();
+
         // Poll status every 5 seconds
-        checkStatus();
-        setInterval(checkStatus, 5000);
+        setInterval(pollStatus, 5000);
     </script>
 </body>
 </html>

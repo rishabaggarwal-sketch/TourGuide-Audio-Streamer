@@ -264,91 +264,90 @@
     </div>
 
     <script>
+        // --- WebSocket API helper ---
+        const WS_STATUS_URL = 'ws://' + window.location.hostname + ':8765/status';
+
+        function wsRequest(action, extra) {
+            return new Promise((resolve, reject) => {
+                const ws = new WebSocket(WS_STATUS_URL);
+                ws.onopen = () => ws.send(JSON.stringify({action, ...extra}));
+                ws.onmessage = (e) => { resolve(JSON.parse(e.data)); ws.close(); };
+                ws.onerror = () => { reject('Connection failed'); ws.close(); };
+                setTimeout(() => { ws.close(); reject('Timeout'); }, 5000);
+            });
+        }
+
         // --- Fetch Status ---
         function fetchStatus() {
-            // Stream status + listeners
-            fetch('/api/status')
-                .then(r => r.json())
-                .then(data => {
-                    const dot = document.getElementById('streamDot');
-                    const label = document.getElementById('streamLabel');
-                    const count = document.getElementById('listenerCount');
+            wsRequest('status').then(data => {
+                const dot = document.getElementById('streamDot');
+                const label = document.getElementById('streamLabel');
+                const count = document.getElementById('listenerCount');
 
-                    if (data.streaming) {
-                        dot.classList.add('on');
-                        dot.classList.remove('off');
-                        label.textContent = 'LIVE';
-                    } else {
-                        dot.classList.remove('on');
-                        dot.classList.add('off');
-                        label.textContent = 'Offline';
-                    }
+                if (data.streaming) {
+                    dot.classList.add('on');
+                    dot.classList.remove('off');
+                    label.textContent = 'LIVE';
+                } else {
+                    dot.classList.remove('on');
+                    dot.classList.add('off');
+                    label.textContent = 'Offline';
+                }
 
-                    count.textContent = data.listeners;
-                    count.className = 'stat-value ' + (data.listeners > 0 ? 'green' : '');
+                count.textContent = data.listeners;
+                count.className = 'stat-value ' + (data.listeners > 0 ? 'green' : '');
 
-                    // Current recording
-                    const recEl = document.getElementById('currentRecording');
-                    if (data.current_recording && data.streaming) {
-                        recEl.innerHTML = `
-                            <div class="recording-current">
-                                <div class="label"><span class="rec-dot"></span> Recording</div>
-                                <div class="filename">${data.current_recording}</div>
-                            </div>`;
-                    } else {
-                        recEl.innerHTML = '<div class="empty-state">Not recording</div>';
-                    }
-                })
-                .catch(() => {
-                    document.getElementById('streamLabel').textContent = 'Error';
-                });
+                const recEl = document.getElementById('currentRecording');
+                if (data.current_recording && data.streaming) {
+                    recEl.innerHTML = `
+                        <div class="recording-current">
+                            <div class="label"><span class="rec-dot"></span> Recording</div>
+                            <div class="filename">${data.current_recording}</div>
+                        </div>`;
+                } else {
+                    recEl.innerHTML = '<div class="empty-state">Not recording</div>';
+                }
+            }).catch(() => {
+                document.getElementById('streamLabel').textContent = 'Error';
+            });
 
-            // Disk info
-            fetch('/api/disk')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('diskFree').textContent = data.free_gb;
-                })
-                .catch(() => {});
+            wsRequest('disk').then(data => {
+                document.getElementById('diskFree').textContent = data.free_gb;
+            }).catch(() => {});
         }
 
         // --- Fetch Recordings ---
         function fetchRecordings() {
-            fetch('/api/recordings')
-                .then(r => r.json())
-                .then(data => {
-                    const list = document.getElementById('recordingsList');
-                    if (!data.recordings || data.recordings.length === 0) {
-                        list.innerHTML = '<li class="empty-state">No recordings yet</li>';
-                        return;
-                    }
-                    list.innerHTML = data.recordings.map(rec => {
-                        const date = new Date(rec.created).toLocaleString();
-                        const duration = rec.duration_min ? rec.duration_min + ' min' : '...';
-                        return `
-                            <li class="rec-item">
-                                <div class="rec-meta">
-                                    <div class="rec-name">${rec.filename}</div>
-                                    <div class="rec-details">${date} | ${duration} | ${rec.size_mb} MB</div>
-                                </div>
-                                <div class="rec-actions">
-                                    <a href="${rec.download_url}" download class="btn-sm btn-download">Download</a>
-                                    <button class="btn-sm btn-delete" onclick="deleteRec('${rec.filename}')">Delete</button>
-                                </div>
-                            </li>`;
-                    }).join('');
-                })
-                .catch(() => {
-                    document.getElementById('recordingsList').innerHTML =
-                        '<li class="empty-state">Could not load recordings</li>';
-                });
+            wsRequest('recordings').then(data => {
+                const list = document.getElementById('recordingsList');
+                if (!data.recordings || data.recordings.length === 0) {
+                    list.innerHTML = '<li class="empty-state">No recordings yet</li>';
+                    return;
+                }
+                list.innerHTML = data.recordings.map(rec => {
+                    const date = new Date(rec.created).toLocaleString();
+                    return `
+                        <li class="rec-item">
+                            <div class="rec-meta">
+                                <div class="rec-name">${rec.filename}</div>
+                                <div class="rec-details">${date} | ${rec.size_mb} MB</div>
+                            </div>
+                            <div class="rec-actions">
+                                <a href="${rec.download_url}" download class="btn-sm btn-download">Download</a>
+                                <button class="btn-sm btn-delete" onclick="deleteRec('${rec.filename}')">Delete</button>
+                            </div>
+                        </li>`;
+                }).join('');
+            }).catch(() => {
+                document.getElementById('recordingsList').innerHTML =
+                    '<li class="empty-state">Could not load recordings</li>';
+            });
         }
 
         // --- Delete Recording ---
         function deleteRec(filename) {
             if (!confirm('Delete ' + filename + '?')) return;
-            fetch('/api/recordings/delete?file=' + encodeURIComponent(filename))
-                .then(r => r.json())
+            wsRequest('delete', {file: filename})
                 .then(() => fetchRecordings())
                 .catch(err => alert('Delete failed: ' + err));
         }
@@ -356,8 +355,7 @@
         // --- Cleanup Old ---
         function cleanupOld() {
             if (!confirm('Delete all recordings older than 30 days?')) return;
-            fetch('/api/cleanup?days=30')
-                .then(r => r.json())
+            wsRequest('cleanup', {days: 30})
                 .then(data => {
                     alert('Deleted ' + data.count + ' old recording(s)');
                     fetchRecordings();
