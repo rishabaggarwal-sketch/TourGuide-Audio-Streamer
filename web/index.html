@@ -290,6 +290,7 @@
     <div class="header">
         <h1 id="tourTitle">Tour Audio Guide</h1>
         <div class="subtitle" id="tourSubtitle">Connect your headphones and tap play</div>
+        <div class="subtitle" style="margin-top: 0.3rem; font-size: 0.65rem;">Developed by PC-K Department</div>
     </div>
 
     <!-- Status Bar -->
@@ -409,9 +410,13 @@
         </div>
     </div>
 
+    <script src="/hls.min.js"></script>
     <script>
-        // --- Web Audio API Low-Latency Player (v2) ---
-        const WS_URL = 'ws://' + window.location.hostname + '/ws';
+        // --- HLS Audio Player ---
+        // Uses HLS (HTTP Live Streaming) for reliable playback on all phones.
+        // iOS: native HLS support. Android: hls.js polyfill.
+        const HLS_URL = '/hls/stream.m3u8';
+
         const streamDot = document.getElementById('streamDot');
         const streamStatus = document.getElementById('streamStatus');
         const playRing = document.getElementById('playRing');
@@ -425,112 +430,12 @@
         const errorBanner = document.getElementById('errorBanner');
         const volumeSlider = document.getElementById('volumeSlider');
 
-        let audioCtx = null;
-        let gainNode = null;
-        let ws = null;
         let isPlaying = false;
-        let srcSampleRate = 16000;
-        let channels = 1;
-        let wsConnected = false;
-
-        // Buffer management for smooth playback
-        let nextPlayTime = 0;
-        const BUFFER_DURATION = 0.05; // 50ms scheduling ahead
-        const MAX_LATENCY = 0.4; // Drop audio if more than 400ms behind
-        let audioChunks = []; // Accumulate small chunks before playing
-        let pendingBytes = 0;
-        const MIN_BUFFER_BYTES = 1600; // Accumulate ~50ms before scheduling
-
-        // --- WebSocket Connection ---
-        function connectWS() {
-            if (ws && ws.readyState <= 1) return;
-
-            ws = new WebSocket(WS_URL);
-            ws.binaryType = 'arraybuffer';
-
-            ws.onopen = () => {
-                wsConnected = true;
-                streamDot.classList.add('live');
-                streamDot.classList.remove('off');
-                streamStatus.textContent = 'Live';
-                errorBanner.style.display = 'none';
-            };
-
-            ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
-                    // JSON config message
-                    try {
-                        const config = JSON.parse(event.data);
-                        if (config.type === 'config') {
-                            srcSampleRate = config.sampleRate;
-                            channels = config.channels;
-                        }
-                    } catch(e) {}
-                    return;
-                }
-
-                // Binary audio data
-                if (!isPlaying || !audioCtx) return;
-
-
-                // Accumulate small chunks into larger buffer for smoother playback
-                audioChunks.push(new Int16Array(event.data));
-                pendingBytes += event.data.byteLength;
-
-                if (pendingBytes < MIN_BUFFER_BYTES) return;
-
-                // Merge accumulated chunks
-                let totalSamples = 0;
-                for (const chunk of audioChunks) totalSamples += chunk.length;
-                const merged = new Float32Array(totalSamples);
-                let offset = 0;
-                for (const chunk of audioChunks) {
-                    for (let i = 0; i < chunk.length; i++) {
-                        merged[offset++] = chunk[i] / 32768.0;
-                    }
-                }
-                audioChunks = [];
-                pendingBytes = 0;
-
-                // Create audio buffer and schedule for playback
-                try {
-                    const buffer = audioCtx.createBuffer(1, merged.length, srcSampleRate);
-                    buffer.getChannelData(0).set(merged);
-
-                    const now = audioCtx.currentTime;
-
-                    // If we've fallen too far behind, skip ahead to stay real-time
-                    if (nextPlayTime > now + MAX_LATENCY) {
-                        nextPlayTime = now + BUFFER_DURATION;
-                    }
-                    if (nextPlayTime < now) {
-                        nextPlayTime = now + BUFFER_DURATION;
-                    }
-
-                    const source = audioCtx.createBufferSource();
-                    source.buffer = buffer;
-                    source.connect(gainNode);
-                    source.start(nextPlayTime);
-                    nextPlayTime += buffer.duration;
-                } catch(e) {
-                    console.error('Audio error:', e);
-                }
-            };
-
-            ws.onclose = () => {
-                wsConnected = false;
-                streamDot.classList.remove('live');
-                streamDot.classList.add('off');
-                streamStatus.textContent = 'Reconnecting...';
-                setTimeout(connectWS, 2000);
-            };
-
-            ws.onerror = () => {
-                streamDot.classList.remove('live');
-                streamDot.classList.add('off');
-                streamStatus.textContent = 'Offline';
-            };
-        }
+        let wakeLock = null;
+        let hls = null;
+        const audio = new Audio();
+        audio.preload = 'none';
+        audio.setAttribute('playsinline', '');
 
         // --- Audio Control ---
         function togglePlay() {
@@ -542,45 +447,120 @@
         }
 
         function startAudio() {
-            // Create AudioContext on user gesture (required by browsers)
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-                    latencyHint: 'interactive',
+            // Clean up previous
+            destroyHls();
+
+            if (audio.canPlayType('application/vnd.apple.mpegurl')) {
+                // iOS Safari: native HLS support
+                audio.src = HLS_URL + '?t=' + Date.now();
+            } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                // Android/other: use hls.js
+                hls = new Hls({
+                    liveSyncDurationCount: 1,
+                    liveMaxLatencyDurationCount: 3,
+                    enableWorker: false,
                 });
-                gainNode = audioCtx.createGain();
-                gainNode.gain.value = volumeSlider.value / 100;
-                gainNode.connect(audioCtx.destination);
-
-                // iOS Safari unlock: play a tiny silent buffer to unblock audio output
-                const unlock = audioCtx.createBuffer(1, 1, 22050);
-                const src = audioCtx.createBufferSource();
-                src.buffer = unlock;
-                src.connect(audioCtx.destination);
-                src.start(0);
+                hls.loadSource(HLS_URL);
+                hls.attachMedia(audio);
+                hls.on(Hls.Events.ERROR, function(event, data) {
+                    if (data.fatal && isPlaying) {
+                        playerStatus.textContent = 'Reconnecting...';
+                        setTimeout(() => { if (isPlaying) startAudio(); }, 3000);
+                    }
+                });
+            } else {
+                errorBanner.style.display = 'block';
+                errorBanner.textContent = 'HLS not supported on this browser.';
+                return;
             }
 
-            if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+            audio.volume = volumeSlider.value / 100;
+            audio.play().then(() => {
+                isPlaying = true;
+                updateUI(true);
+                streamDot.classList.add('live');
+                streamDot.classList.remove('off');
+                streamStatus.textContent = 'Live';
+                errorBanner.style.display = 'none';
+            }).catch(() => {
+                errorBanner.style.display = 'block';
+                errorBanner.textContent = 'Could not start audio. Tap play again.';
+                setTimeout(() => { errorBanner.style.display = 'none'; }, 5000);
+            });
+
+            // Media Session API: lock screen controls
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: 'Tour Audio Guide',
+                    artist: 'Live Stream',
+                    album: 'Tour Guide',
+                });
+                navigator.mediaSession.setActionHandler('play', () => {
+                    if (!isPlaying) togglePlay();
+                });
+                navigator.mediaSession.setActionHandler('pause', () => {
+                    if (isPlaying) togglePlay();
+                });
             }
 
-            nextPlayTime = 0;
-            audioChunks = [];
-            pendingBytes = 0;
-            isPlaying = true;
-            updateUI(true);
+            requestWakeLock();
+        }
 
-            // Connect WebSocket if not connected
-            if (!wsConnected) {
-                connectWS();
+        function destroyHls() {
+            if (hls) {
+                hls.destroy();
+                hls = null;
             }
+            audio.pause();
+            audio.removeAttribute('src');
+            audio.load();
         }
 
         function stopAudio() {
+            destroyHls();
             isPlaying = false;
-            audioChunks = [];
-            pendingBytes = 0;
             updateUI(false);
+            releaseWakeLock();
         }
+
+        // Auto-reconnect on error (native HLS / iOS)
+        audio.addEventListener('error', () => {
+            if (isPlaying && !hls) {
+                playerStatus.textContent = 'Reconnecting...';
+                setTimeout(() => { if (isPlaying) startAudio(); }, 3000);
+            }
+        });
+
+        audio.addEventListener('waiting', () => {
+            if (isPlaying) playerStatus.textContent = 'Buffering...';
+        });
+
+        audio.addEventListener('playing', () => {
+            if (isPlaying) playerStatus.textContent = 'Listening...';
+        });
+
+        // --- Wake Lock ---
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator) {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => { wakeLock = null; });
+                }
+            } catch(e) {}
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release().catch(() => {});
+                wakeLock = null;
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && isPlaying) {
+                requestWakeLock();
+            }
+        });
 
         function updateUI(playing) {
             if (playing) {
@@ -604,9 +584,7 @@
 
         // --- Volume ---
         function setVolume(val) {
-            if (gainNode) {
-                gainNode.gain.value = val / 100;
-            }
+            audio.volume = val / 100;
             document.getElementById('volValue').textContent = val + '%';
             volumeSlider.style.setProperty('--val', val + '%');
         }
@@ -620,7 +598,7 @@
             document.getElementById('tab-' + name).classList.add('active');
         }
 
-        // --- Status polling via WebSocket ---
+        // --- Status polling ---
         function pollStatus() {
             const statusWs = new WebSocket('ws://' + window.location.hostname + '/ws/status');
             statusWs.onopen = () => {
@@ -641,17 +619,12 @@
 
         // Check for map image
         fetch('/map.jpg', { method: 'HEAD' })
-            .then(r => {
-                if (r.ok) {
-                    document.getElementById('mapArea').innerHTML = '<img src="/map.jpg" alt="Tour Map">';
-                }
-            })
+            .then(r => { if (r.ok) document.getElementById('mapArea').innerHTML = '<img src="/map.jpg" alt="Tour Map">'; })
             .catch(() => {});
 
-        // Start WebSocket connection immediately
-        connectWS();
-
-        // Poll status every 5 seconds
+        pollStatus();
+        streamDot.classList.add('live');
+        streamStatus.textContent = 'Ready';
         setInterval(pollStatus, 5000);
     </script>
 </body>

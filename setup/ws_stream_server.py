@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-Low-latency WebSocket Audio Streaming Server
-Captures audio from USB sound card and streams raw PCM via WebSocket.
-Clients use Web Audio API for immediate playback (~200-500ms latency).
+Tour Guide Audio Streaming Server
+Captures audio from USB sound card and streams via:
+  - HLS (HTTP Live Streaming) for reliable background playback on all phones
+  - WebSocket raw PCM for low-latency foreground (future use)
+  - Admin API via WebSocket
 """
 
 import asyncio
@@ -12,25 +14,32 @@ import sys
 import json
 import os
 import glob
+import tempfile
+import shutil
 from datetime import datetime, timedelta
+from aiohttp import web
 
-# pip install websockets (included in install)
 import websockets
 
 # --- Configuration ---
 HOST = "0.0.0.0"
 WS_PORT = 8765
-SAMPLE_RATE = 16000  # 16kHz is plenty for speech
+HTTP_PORT = 8766
+SAMPLE_RATE = 16000
 CHANNELS = 1
-CHUNK_SIZE = 3200  # 100ms of 16-bit mono @ 16kHz (16000 * 2 * 0.1)
+CHUNK_SIZE = 3200  # 100ms of 16-bit mono @ 16kHz
 RECORDINGS_DIR = "/home/pi/recordings"
-USB_CARD = None  # Auto-detected
+HLS_DIR = "/tmp/tourguide-hls"
+HLS_SEGMENT_TIME = 1  # seconds per segment (lower = less latency)
+HLS_LIST_SIZE = 2     # keep last 2 segments in playlist
+USB_CARD = None
 
 # --- Global state ---
 clients = set()
 is_streaming = False
 current_recording = None
-ffmpeg_process = None
+ffmpeg_capture = None
+ffmpeg_hls = None
 
 
 def detect_usb_card():
@@ -45,23 +54,24 @@ def detect_usb_card():
                 return int(card_num)
     except Exception:
         pass
-    return 2  # Default fallback
+    return 2
 
 
 async def audio_producer():
-    """Capture audio from USB sound card and broadcast to all WebSocket clients."""
-    global is_streaming, ffmpeg_process, current_recording
+    """Capture audio from USB and broadcast PCM to WebSocket + feed HLS encoder."""
+    global is_streaming, ffmpeg_capture, ffmpeg_hls, current_recording
 
     USB_CARD = detect_usb_card()
     print(f"[OK] USB sound card: card {USB_CARD}")
 
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
+    os.makedirs(HLS_DIR, exist_ok=True)
+
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     current_recording = f"tour_{timestamp}.wav"
-    rec_path = os.path.join(RECORDINGS_DIR, current_recording)
 
-    # FFmpeg: capture from USB mic, output raw PCM to stdout
-    cmd = [
+    # FFmpeg #1: ALSA capture -> raw PCM stdout
+    capture_cmd = [
         "ffmpeg", "-nostdin",
         "-f", "alsa", "-channels", str(CHANNELS),
         "-sample_rate", str(SAMPLE_RATE),
@@ -71,44 +81,111 @@ async def audio_producer():
         "pipe:1",
     ]
 
-    print(f"[OK] Starting audio capture...")
-    print(f"[OK] Recording to: {rec_path}")
+    # FFmpeg #2: PCM stdin -> HLS segments
+    hls_cmd = [
+        "ffmpeg", "-nostdin", "-hide_banner",
+        "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", str(CHANNELS),
+        "-i", "pipe:0",
+        "-codec:a", "aac", "-b:a", "64k", "-ac", str(CHANNELS),
+        "-f", "hls",
+        "-hls_time", str(HLS_SEGMENT_TIME),
+        "-hls_list_size", str(HLS_LIST_SIZE),
+        "-hls_flags", "delete_segments+append_list+omit_endlist",
+        "-hls_segment_filename", os.path.join(HLS_DIR, "seg_%05d.ts"),
+        os.path.join(HLS_DIR, "stream.m3u8"),
+    ]
+
+    print(f"[OK] Starting audio capture + HLS encoder...")
 
     while True:
-        ffmpeg_process = await asyncio.create_subprocess_exec(
-            *cmd,
+        # Clean HLS dir on start
+        for f in glob.glob(os.path.join(HLS_DIR, "*")):
+            os.remove(f)
+
+        ffmpeg_capture = await asyncio.create_subprocess_exec(
+            *capture_cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
+
+        ffmpeg_hls = await asyncio.create_subprocess_exec(
+            *hls_cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+
         is_streaming = True
-        print(f"[OK] WebSocket streaming on port {WS_PORT}", flush=True)
+        print(f"[OK] HLS streaming to {HLS_DIR}", flush=True)
+        print(f"[OK] WebSocket on port {WS_PORT}", flush=True)
 
         chunks = 0
         try:
             while True:
-                data = await ffmpeg_process.stdout.read(CHUNK_SIZE)
+                data = await ffmpeg_capture.stdout.read(CHUNK_SIZE)
                 if not data:
                     break
                 chunks += 1
                 if chunks == 1:
                     print(f"[OK] First audio chunk: {len(data)} bytes", flush=True)
 
-                # Broadcast to all connected clients
+                # Broadcast raw PCM to WebSocket clients
                 if clients:
                     websockets.broadcast(clients, data)
+
+                # Feed PCM to HLS encoder
+                try:
+                    ffmpeg_hls.stdin.write(data)
+                    await ffmpeg_hls.stdin.drain()
+                except (BrokenPipeError, ConnectionResetError):
+                    break
+
         except asyncio.CancelledError:
             is_streaming = False
-            if ffmpeg_process:
-                ffmpeg_process.terminate()
-                await ffmpeg_process.wait()
+            for proc in [ffmpeg_capture, ffmpeg_hls]:
+                if proc:
+                    proc.terminate()
+                    await proc.wait()
             return
         finally:
             is_streaming = False
 
-        # FFmpeg exited - retry
-        retcode = ffmpeg_process.returncode
-        print(f"[WARN] FFmpeg exited with code {retcode}, restarting in 3s...", flush=True)
+        # Restart on failure
+        for proc in [ffmpeg_capture, ffmpeg_hls]:
+            if proc and proc.returncode is None:
+                proc.terminate()
+                await proc.wait()
+
+        print(f"[WARN] FFmpeg exited, restarting in 3s...", flush=True)
         await asyncio.sleep(3)
+
+
+# --- HLS File Server ---
+async def handle_hls(request):
+    """Serve HLS playlist and segments."""
+    filename = request.match_info.get('filename', 'stream.m3u8')
+
+    # Only allow .m3u8 and .ts files
+    if not (filename.endswith('.m3u8') or filename.endswith('.ts')):
+        return web.Response(status=404)
+
+    filepath = os.path.join(HLS_DIR, filename)
+    if not os.path.exists(filepath):
+        return web.Response(status=404)
+
+    if filename.endswith('.m3u8'):
+        content_type = 'application/vnd.apple.mpegurl'
+    else:
+        content_type = 'video/MP2T'
+
+    return web.FileResponse(
+        filepath,
+        headers={
+            'Content-Type': content_type,
+            'Cache-Control': 'no-cache, no-store',
+            'Access-Control-Allow-Origin': '*',
+        }
+    )
 
 
 async def handle_client(websocket):
@@ -117,7 +194,6 @@ async def handle_client(websocket):
     remote = websocket.remote_address
     print(f"[+] Client connected: {remote} (total: {len(clients)})")
 
-    # Send audio config as first message
     config = json.dumps({
         "type": "config",
         "sampleRate": SAMPLE_RATE,
@@ -127,9 +203,7 @@ async def handle_client(websocket):
     await websocket.send(config)
 
     try:
-        # Keep connection alive, handle any client messages
         async for message in websocket:
-            # Client can send control messages (future use)
             pass
     except websockets.exceptions.ConnectionClosed:
         pass
@@ -139,7 +213,7 @@ async def handle_client(websocket):
 
 
 async def status_handler(websocket):
-    """Handle status/API WebSocket requests on /status path."""
+    """Handle status/API WebSocket requests."""
     try:
         async for message in websocket:
             try:
@@ -209,7 +283,6 @@ async def status_handler(websocket):
 async def handler(websocket):
     """Route WebSocket connections based on path."""
     path = websocket.request.path if hasattr(websocket, 'request') else '/'
-
     if path == "/status":
         await status_handler(websocket)
     else:
@@ -218,18 +291,24 @@ async def handler(websocket):
 
 async def main():
     print("============================================")
-    print("  Tour Guide WebSocket Audio Server")
-    print(f"  ws://0.0.0.0:{WS_PORT}/        (audio stream)")
+    print("  Tour Guide Audio Server (HLS)")
+    print(f"  ws://0.0.0.0:{WS_PORT}/        (WebSocket audio)")
     print(f"  ws://0.0.0.0:{WS_PORT}/status  (admin API)")
+    print(f"  http://0.0.0.0:{HTTP_PORT}/hls/ (HLS stream)")
     print("============================================")
 
-    # Start WebSocket server (websockets v16 API)
-    server = await websockets.serve(handler, HOST, WS_PORT)
+    ws_server = await websockets.serve(handler, HOST, WS_PORT)
 
-    # Start audio capture in background
+    app = web.Application()
+    app.router.add_get('/hls/{filename}', handle_hls)
+    app.router.add_get('/hls/', lambda r: handle_hls_redirect(r))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    http_site = web.TCPSite(runner, HOST, HTTP_PORT)
+    await http_site.start()
+
     audio_task = asyncio.create_task(audio_producer())
 
-    # Run forever until killed
     try:
         while True:
             await asyncio.sleep(3600)
@@ -237,9 +316,16 @@ async def main():
         pass
     finally:
         audio_task.cancel()
-        server.close()
-        await server.wait_closed()
+        ws_server.close()
+        await ws_server.wait_closed()
+        await runner.cleanup()
+        # Clean up HLS files
+        shutil.rmtree(HLS_DIR, ignore_errors=True)
         print("\n[OK] Server stopped")
+
+
+async def handle_hls_redirect(request):
+    return web.HTTPFound('/hls/stream.m3u8')
 
 
 if __name__ == "__main__":
