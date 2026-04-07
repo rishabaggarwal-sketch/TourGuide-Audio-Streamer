@@ -28,11 +28,11 @@ WS_PORT = 8765
 HTTP_PORT = 8766
 SAMPLE_RATE = 16000
 CHANNELS = 1
-CHUNK_SIZE = 3200  # 100ms of 16-bit mono @ 16kHz
+CHUNK_SIZE = 1600  # 50ms of 16-bit mono @ 16kHz (tighter pipe for lower latency)
 RECORDINGS_DIR = "/home/pi/recordings"
 HLS_DIR = "/tmp/tourguide-hls"
-HLS_SEGMENT_TIME = 1  # seconds per segment (lower = less latency)
-HLS_LIST_SIZE = 2     # keep last 2 segments in playlist
+HLS_SEGMENT_TIME = 0.5  # seconds per segment (lower = less latency)
+HLS_LIST_SIZE = 3       # keep last 3 segments in playlist
 USB_CARD = None
 
 # --- Global state ---
@@ -127,27 +127,38 @@ async def audio_producer():
     os.makedirs(RECORDINGS_DIR, exist_ok=True)
     os.makedirs(HLS_DIR, exist_ok=True)
 
-    # FFmpeg #1: ALSA capture -> raw PCM stdout
+    # FFmpeg #1: ALSA capture -> raw PCM stdout (low-latency flags)
     capture_cmd = [
         "ffmpeg", "-nostdin",
+        "-fflags", "+nobuffer+flush_packets",
+        "-flags", "+low_delay",
+        "-probesize", "32",
+        "-analyzeduration", "0",
         "-f", "alsa", "-channels", str(CHANNELS),
         "-sample_rate", str(SAMPLE_RATE),
+        "-thread_queue_size", "512",
         "-i", f"plughw:{USB_CARD},0",
         "-f", "s16le", "-acodec", "pcm_s16le",
         "-ar", str(SAMPLE_RATE), "-ac", str(CHANNELS),
         "pipe:1",
     ]
 
-    # FFmpeg #2: PCM stdin -> HLS segments
+    # FFmpeg #2: PCM stdin -> HLS segments (low-latency flags)
     hls_cmd = [
         "ffmpeg", "-nostdin", "-hide_banner",
+        "-fflags", "+nobuffer+flush_packets",
+        "-flags", "+low_delay",
+        "-probesize", "32",
+        "-analyzeduration", "0",
         "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", str(CHANNELS),
         "-i", "pipe:0",
         "-codec:a", "aac", "-b:a", "64k", "-ac", str(CHANNELS),
+        "-profile:a", "aac_low",
+        "-force_key_frames", f"expr:gte(t,n_forced*{HLS_SEGMENT_TIME})",
         "-f", "hls",
         "-hls_time", str(HLS_SEGMENT_TIME),
         "-hls_list_size", str(HLS_LIST_SIZE),
-        "-hls_flags", "delete_segments+append_list+omit_endlist",
+        "-hls_flags", "delete_segments+append_list+omit_endlist+split_by_time",
         "-hls_segment_filename", os.path.join(HLS_DIR, "seg_%05d.ts"),
         os.path.join(HLS_DIR, "stream.m3u8"),
     ]

@@ -453,12 +453,26 @@
             if (audio.canPlayType('application/vnd.apple.mpegurl')) {
                 // iOS Safari: native HLS support
                 audio.src = HLS_URL + '?t=' + Date.now();
+                // Seek to live edge once ready (reduces iOS buffering delay)
+                audio.addEventListener('canplay', function seekLive() {
+                    if (audio.duration && isFinite(audio.duration)) {
+                        audio.currentTime = audio.duration;
+                    }
+                    audio.removeEventListener('canplay', seekLive);
+                }, { once: true });
             } else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 // Android/other: use hls.js
                 hls = new Hls({
+                    lowLatencyMode: true,
+                    liveSyncDuration: 0.5,
+                    liveMaxLatencyDuration: 2.0,
                     liveSyncDurationCount: 1,
-                    liveMaxLatencyDurationCount: 3,
+                    liveMaxLatencyDurationCount: 4,
+                    maxBufferLength: 2,
+                    maxMaxBufferLength: 3,
+                    backBufferLength: 0,
                     enableWorker: false,
+                    progressive: true,
                 });
                 hls.loadSource(HLS_URL);
                 hls.attachMedia(audio);
