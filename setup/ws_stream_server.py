@@ -356,6 +356,41 @@ async def status_handler(websocket):
         pass
 
 
+WEB_DIR = "/home/pi/tourguide-web"
+
+
+async def handle_upload_map(request):
+    """Handle map image upload from admin page."""
+    reader = await request.multipart()
+    field = await reader.next()
+    if not field or field.name != 'map':
+        return web.Response(status=400, text='No file')
+
+    # Read file data
+    data = await field.read()
+    if not data:
+        return web.Response(status=400, text='Empty file')
+
+    # Save as map.jpg (overwrite existing)
+    map_path = os.path.join(WEB_DIR, 'map.jpg')
+    with open(map_path, 'wb') as f:
+        f.write(data)
+
+    size_kb = len(data) / 1024
+    print(f"[OK] Map uploaded: {size_kb:.0f} KB", flush=True)
+    return web.json_response({"ok": True, "size_kb": round(size_kb)})
+
+
+async def handle_delete_map(request):
+    """Delete the tour map."""
+    map_path = os.path.join(WEB_DIR, 'map.jpg')
+    if os.path.exists(map_path):
+        os.remove(map_path)
+        print("[OK] Map deleted", flush=True)
+        return web.json_response({"ok": True})
+    return web.json_response({"ok": False, "error": "No map found"})
+
+
 async def handler(websocket):
     """Route WebSocket connections based on path."""
     path = websocket.request.path if hasattr(websocket, 'request') else '/'
@@ -378,6 +413,8 @@ async def main():
     app = web.Application()
     app.router.add_get('/hls/{filename}', handle_hls)
     app.router.add_get('/hls/', lambda r: handle_hls_redirect(r))
+    app.router.add_post('/api/upload-map', handle_upload_map)
+    app.router.add_post('/api/delete-map', handle_delete_map)
     runner = web.AppRunner(app)
     await runner.setup()
     http_site = web.TCPSite(runner, HOST, HTTP_PORT)

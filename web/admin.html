@@ -269,6 +269,27 @@
         </div>
     </div>
 
+    <!-- Tour Map -->
+    <div class="section">
+        <div class="section-title">Tour Map</div>
+        <div id="mapPreview" style="margin-bottom: 0.8rem; text-align: center;">
+            <img id="mapImg" src="/map.jpg" alt="Tour Map"
+                 style="max-width: 100%; border-radius: 8px; display: none;"
+                 onload="this.style.display='block'"
+                 onerror="this.style.display='none'; document.getElementById('mapEmpty').style.display='block'">
+            <div id="mapEmpty" style="display:none; color: #6b7394; font-size: 0.8rem; padding: 1.5rem; border: 2px dashed rgba(255,255,255,0.1); border-radius: 8px;">
+                No map uploaded yet
+            </div>
+        </div>
+        <label class="btn-full" style="display:block; text-align:center; cursor:pointer;">
+            Upload Map Image
+            <input type="file" accept="image/*" id="mapFileInput" style="display:none" onchange="uploadMap(this)">
+        </label>
+        <button class="btn-full" onclick="deleteMap()" style="margin-top:0.5rem; background:rgba(239,68,68,0.1); color:#ef4444; border:1px solid rgba(239,68,68,0.2);">
+            Delete Map
+        </button>
+    </div>
+
     <!-- QR Code -->
     <div class="section">
         <div class="section-title">Visitor QR Code</div>
@@ -431,6 +452,39 @@
                     fetchRecordings();
                 })
                 .catch(err => alert('Cleanup failed: ' + err));
+        }
+
+        // --- Map Upload/Delete ---
+        function uploadMap(input) {
+            const file = input.files[0];
+            if (!file) return;
+            const formData = new FormData();
+            formData.append('map', file);
+
+            fetch('/api/upload-map', { method: 'POST', body: formData })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        // Refresh map preview
+                        const img = document.getElementById('mapImg');
+                        img.src = '/map.jpg?t=' + Date.now();
+                        img.style.display = 'block';
+                        document.getElementById('mapEmpty').style.display = 'none';
+                    }
+                })
+                .catch(() => alert('Upload failed'));
+            input.value = '';
+        }
+
+        function deleteMap() {
+            if (!confirm('Delete the tour map?')) return;
+            fetch('/api/delete-map', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('mapImg').style.display = 'none';
+                    document.getElementById('mapEmpty').style.display = 'block';
+                })
+                .catch(() => alert('Delete failed'));
         }
 
         // --- Init ---
