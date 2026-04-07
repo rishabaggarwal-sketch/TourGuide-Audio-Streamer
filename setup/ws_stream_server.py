@@ -37,6 +37,8 @@ USB_CARD = None
 
 # --- Global state ---
 clients = set()
+hls_listeners = {}  # ip -> last_ping_time (for HLS listener tracking)
+HLS_LISTENER_TIMEOUT = 20  # seconds before considering a listener gone
 is_streaming = False
 is_recording = False
 current_recording = None
@@ -44,6 +46,18 @@ rec_file = None
 pcm_bytes_written = 0
 ffmpeg_capture = None
 ffmpeg_hls = None
+
+
+import time as _time
+
+
+def get_active_listeners():
+    """Count active HLS listeners (exclude stale pings)."""
+    now = _time.time()
+    stale = [ip for ip, t in hls_listeners.items() if now - t > HLS_LISTENER_TIMEOUT]
+    for ip in stale:
+        del hls_listeners[ip]
+    return len(hls_listeners)
 
 
 def detect_usb_card():
@@ -298,7 +312,7 @@ async def status_handler(websocket):
                     resp = {
                         "streaming": is_streaming,
                         "recording": is_recording,
-                        "listeners": len(clients),
+                        "listeners": get_active_listeners(),
                         "current_recording": current_recording,
                     }
                     await websocket.send(json.dumps(resp))
@@ -402,6 +416,13 @@ async def handle_delete_map(request):
     return web.json_response({"ok": False, "error": "No map found"})
 
 
+async def handle_ping(request):
+    """Track HLS listener presence via periodic ping."""
+    ip = request.remote
+    hls_listeners[ip] = _time.time()
+    return web.json_response({"ok": True, "listeners": get_active_listeners()})
+
+
 async def handler(websocket):
     """Route WebSocket connections based on path."""
     path = websocket.request.path if hasattr(websocket, 'request') else '/'
@@ -426,6 +447,7 @@ async def main():
     app.router.add_get('/hls/', lambda r: handle_hls_redirect(r))
     app.router.add_post('/api/upload-map', handle_upload_map)
     app.router.add_post('/api/delete-map', handle_delete_map)
+    app.router.add_get('/api/ping', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
     http_site = web.TCPSite(runner, HOST, HTTP_PORT)

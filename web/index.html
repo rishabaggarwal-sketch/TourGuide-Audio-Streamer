@@ -433,6 +433,7 @@
         let isPlaying = false;
         let wakeLock = null;
         let hls = null;
+        let pingInterval = null;
         const audio = new Audio();
         audio.preload = 'none';
         audio.setAttribute('playsinline', '');
@@ -496,6 +497,10 @@
                 streamDot.classList.remove('off');
                 streamStatus.textContent = 'Live';
                 errorBanner.style.display = 'none';
+                // Start listener presence ping
+                if (pingInterval) clearInterval(pingInterval);
+                fetch('/api/ping').catch(() => {});
+                pingInterval = setInterval(() => fetch('/api/ping').catch(() => {}), 10000);
             }).catch(() => {
                 errorBanner.style.display = 'block';
                 errorBanner.textContent = 'Could not start audio. Tap play again.';
@@ -535,6 +540,7 @@
             isPlaying = false;
             updateUI(false);
             releaseWakeLock();
+            if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
         }
 
         // Auto-reconnect on error (native HLS / iOS)

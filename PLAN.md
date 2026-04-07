@@ -100,7 +100,7 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
 |  #  |  Item                      | Est Cost | Where to Buy        |
 +-----+----------------------------+----------+---------------------+
 |  1  | Raspberry Pi 3 Model B+   | Rs 3,500 | Amazon/Robu.in      |
-|     | + MicroSD Card (16GB+)    | Rs   400 |                     |
+|     | + MicroSD Card (128GB)    | Rs   800 |                     |
 +-----+----------------------------+----------+---------------------+
 |  2  | USB Sound Card             | Rs   350 | Amazon              |
 |     | (with mic-in / line-in)    |          | Search: "USB sound  |
@@ -614,7 +614,7 @@ Recording is **manual** — the guide starts/stops recording from the admin page
   Storage math:
   - PCM 16-bit mono @ 16kHz = ~1.9 MB per minute
   - 1 hour tour  = ~110 MB
-  - 16 GB SD card = ~140 hours of recordings
+  - 128 GB SD card = ~900+ hours of recordings
   - Auto-cleanup available: delete older than N days from admin page
 ```
 
