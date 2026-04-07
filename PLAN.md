@@ -52,7 +52,7 @@
   |                                                       |
   |  +----------+    +-----------+    +--------------+   |
   |  |Sennheiser|--->|USB Sound  |--->|Raspberry Pi  |   |
-  |  |Receiver  |3.5 |Card       |USB |(Icecast +    |   |
+  |  |Receiver  |3.5 |Card       |USB |(HLS +        |   |
   |  |(1 unit)  |mm  |(audio in) |    | FFmpeg +     |   |
   |  +----------+    +-----------+    | WiFi Hotspot |   |
   |                                    | + Recording) |   |
@@ -70,7 +70,10 @@
               +-----------+           +-----------+           +-----------+
 ```
 
-**Key Simplification:** The Raspberry Pi IS the WiFi router — no separate router needed. It creates a WiFi hotspot called "TourGuide" that visitors connect to directly.
+**Key Simplifications:**
+- The Raspberry Pi IS the WiFi router — no separate router needed
+- Uses HLS streaming (not Icecast) for reliable background/lock-screen playback on all phones
+- Headset/earphones REQUIRED — phone speaker causes acoustic feedback to wireless mic
 
 ### How It Works (5 Steps)
 
@@ -79,7 +82,7 @@ Step 1: Sennheiser receiver picks up speaker's voice (like any other receiver)
             |
 Step 2: Audio cable carries sound to USB sound card plugged into Pi
             |
-Step 3: Raspberry Pi captures audio, streams via Icecast, and records to file
+Step 3: Raspberry Pi captures audio, streams via HLS, and optionally records to file
             |
 Step 4: Pi's built-in WiFi creates "TourGuide" hotspot (no internet needed)
             |
@@ -231,9 +234,9 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
   |   |  10000 mAh    |  (power)   |              |            |
   |   |               |            | Running:     |            |
   |   |  [Powers Pi   |            | - WiFi Hotspot            |
-  |   |   for 4-6hr]  |            | - Icecast    |            |
-  |   +---------------+            | - FFmpeg     |            |
-  |                                 | - Recording  |            |
+  |   |   for 4-6hr]  |            | - HLS Stream |            |
+  |   +---------------+            | - FFmpeg x2  |            |
+  |                                 | - Admin API  |            |
   |                                 | - Web Server |            |
   |                                 +--------------+            |
   |                                        |                    |
@@ -362,104 +365,94 @@ sudo reboot
 # Done! Pi now boots as a WiFi hotspot with auto-streaming.
 ```
 
-### What the Install Script Does
+### Actual Software Architecture (Deployed)
+
+The original plan called for Icecast, but HLS was chosen instead for reliable background/lock-screen playback on all phones.
 
 ```
-  install.sh executes 8 steps:
+  ws_stream_server.py — single Python process running on Pi:
   +----------------------------------------------------------+
   |                                                          |
-  |  [1/8] System update (apt update + upgrade)              |
+  |  FFmpeg #1: ALSA capture -> raw PCM stdout               |
+  |    (captures audio from USB sound card)                  |
   |           |                                              |
-  |  [2/8] Install packages:                                 |
-  |         - icecast2 (audio streaming server)              |
-  |         - ffmpeg (audio capture + encoding)              |
-  |         - hostapd (WiFi hotspot)                         |
-  |         - dnsmasq (DHCP for connected phones)            |
-  |         - nginx (web server for landing page)            |
-  |         - qrencode (generates QR code image)             |
+  |  FFmpeg #2: PCM stdin -> HLS segments                    |
+  |    (encodes AAC, writes .ts segments + .m3u8 playlist)   |
   |           |                                              |
-  |  [3/8] Configure WiFi hotspot:                           |
-  |         - SSID: TourGuide                                |
-  |         - Password: listen123                            |
-  |         - Pi IP: 192.168.4.1                             |
-  |         - DHCP range: 192.168.4.2 - 192.168.4.50        |
-  |         - Captive portal: auto-redirect to landing page  |
+  |  aiohttp HTTP server (port 8766):                        |
+  |    - /hls/{filename} — serves HLS segments + playlist    |
+  |    - /api/upload-map — tour map upload                   |
+  |    - /api/delete-map — tour map delete                   |
   |           |                                              |
-  |  [4/8] Configure Icecast:                                |
-  |         - Max 100 listeners                              |
-  |         - Burst-on-connect (instant playback)            |
-  |         - Low-latency settings                           |
+  |  websockets server (port 8765):                          |
+  |    - /        — raw PCM broadcast to WebSocket clients   |
+  |    - /status  — admin API (status, recording, disk, etc) |
   |           |                                              |
-  |  [5/8] Create directories:                               |
-  |         - /home/pi/recordings/ (tour audio files)        |
-  |         - /home/pi/tourguide-web/ (landing page)         |
-  |           |                                              |
-  |  [6/8] Configure Nginx:                                  |
-  |         - Serves landing page at http://192.168.4.1/     |
-  |         - Proxies /listen to Icecast stream              |
-  |         - Proxies /api/ to admin API                     |
-  |         - Serves /recordings/ for downloads              |
-  |         - Captive portal redirect                        |
-  |           |                                              |
-  |  [7/8] Create streaming service:                         |
-  |         - Auto-detects USB sound card                    |
-  |         - Streams to Icecast + records to file           |
-  |         - Auto-starts on boot                            |
-  |         - Auto-restarts on failure                       |
-  |           |                                              |
-  |  [8/8] Create admin API:                                 |
-  |         - Python HTTP server on port 8080                |
-  |         - Lists/deletes/downloads recordings             |
-  |         - Shows stream status + listener count           |
-  |         - Disk space monitoring                          |
+  |  Recording: manual start/stop from admin page            |
+  |    - WAV format with proper header patching              |
+  |    - Saved to /home/pi/recordings/                       |
   +----------------------------------------------------------+
 ```
 
 ### Services Running on Pi
 
 ```
-  +-------------------+--------+----------------------------------+
-  | Service           | Port   | Purpose                          |
-  +-------------------+--------+----------------------------------+
-  | hostapd           | -      | WiFi hotspot "TourGuide"         |
-  | dnsmasq           | 53     | DHCP + DNS for connected phones  |
-  | icecast2          | 8000   | Audio streaming server            |
-  | tourguide-stream  | -      | FFmpeg audio capture + recording |
-  | tourguide-admin   | 8080   | Admin API (recordings, status)   |
-  | nginx             | 80     | Web server (landing + admin page)|
-  +-------------------+--------+----------------------------------+
+  +---------------------+--------+--------------------------------------------+
+  | Service             | Port   | Purpose                                    |
+  +---------------------+--------+--------------------------------------------+
+  | hostapd             | -      | WiFi hotspot "TourGuide"                   |
+  | dnsmasq             | 53     | DHCP + DNS for connected phones            |
+  | tourguide-ws        | 8765   | WebSocket server (audio + admin API)       |
+  |                     | 8766   | HTTP server (HLS segments + map API)       |
+  | nginx               | 80     | Reverse proxy + web files                  |
+  +---------------------+--------+--------------------------------------------+
 
-  All auto-start on boot. No manual steps needed.
+  systemd service: tourguide-ws (auto-starts on boot, auto-restarts on failure)
+  Server binary: /usr/local/bin/tourguide-ws-server.py
 ```
 
 ### Network Architecture
 
 ```
   +--------------------------------------------------+
-  |           RASPBERRY PI (192.168.4.1)              |
+  |           RASPBERRY PI                            |
+  |  WiFi Hotspot: 192.168.4.1 (TourGuide/listen123) |
+  |  Ethernet:     192.168.1.96 (for SSH from laptop) |
   |                                                   |
-  |  WiFi Hotspot: "TourGuide" / "listen123"         |
-  |  DHCP: assigns 192.168.4.2 - 192.168.4.50       |
-  |                                                   |
-  |  +--------+  +--------+  +--------+  +--------+ |
-  |  |hostapd |  |Icecast |  | nginx  |  | Admin  | |
-  |  |WiFi AP |  |:8000   |  |  :80   |  | :8080  | |
-  |  +--------+  +---+----+  +---+----+  +---+----+ |
-  |                   |           |           |       |
+  |  +--------+  +------------------+  +--------+    |
+  |  |hostapd |  | tourguide-ws     |  | nginx  |    |
+  |  |WiFi AP |  | :8765 (WS)      |  |  :80   |    |
+  |  |        |  | :8766 (HTTP/HLS) |  |        |    |
+  |  +--------+  +--------+---------+  +---+----+    |
+  |                        |               |          |
   +--------------------------------------------------+
-                      |           |           |
-                      |   +-------+-----------+
-                      |   |
-              Visitor's Phone (192.168.4.x)
-              +-------------------------------+
-              | Browser: http://192.168.4.1/  |
-              |                               |
-              |  nginx serves landing page    |
-              |  /listen -> proxied to Icecast|
-              |  /api/   -> proxied to Admin  |
-              +-------------------------------+
+                           |               |
+                   +-------+---------------+
+                   |
+           Visitor's Phone (192.168.4.x)
+           +-------------------------------+
+           | Browser: http://192.168.4.1/  |
+           |                               |
+           |  nginx routes:                |
+           |  /         -> static web files|
+           |  /ws       -> WS audio :8765  |
+           |  /ws/status-> WS admin :8765  |
+           |  /hls/     -> HLS segs :8766  |
+           |  /api/     -> HTTP API :8766  |
+           |  /recordings/ -> file listing |
+           +-------------------------------+
 
   EVERYTHING IS LOCAL. NO INTERNET NEEDED.
+```
+
+### ALSA Audio Settings (Persisted)
+
+```
+  USB Sound Card (card 2):
+  - Mic Capture: 7% (-9dB) — optimal for Sennheiser line-out
+  - Speaker: 0% (muted) — prevents acoustic feedback
+  - Saved with: alsactl store 2
+  - Persists across reboots via /var/lib/alsa/asound.state
 ```
 
 ---
@@ -495,6 +488,7 @@ sudo reboot
 ```
   +-----------------------------------+
   |  Tour Audio Guide                 |
+  |  Developed by PC-K Department     |
   |  Connect headphones and tap play  |
   |                                   |
   |  +----+ Stream: * Live            |
@@ -588,6 +582,8 @@ When visitors connect to the "TourGuide" WiFi, most phones will **automatically*
 
 ### How Recording Works
 
+Recording is **manual** — the guide starts/stops recording from the admin page. This avoids filling the SD card with silence during idle time.
+
 ```
                               +------------------+
                               |  FFmpeg captures  |
@@ -595,44 +591,43 @@ When visitors connect to the "TourGuide" WiFi, most phones will **automatically*
   Sennheiser --> USB Sound -->|  to TWO places    |
   Receiver       Card         |  simultaneously:  |
                               |                   |
-                              |  1. Icecast ------+--> Visitors' phones (live)
+                              |  1. HLS encoder --+--> Visitors' phones (live)
+                              |     (always on)   |
                               |                   |
-                              |  2. File ---------+--> /home/pi/recordings/
-                              |     tour_2026-    |    (saved on SD card)
-                              |     03-31_14-30   |
-                              |     .ogg          |
+                              |  2. WAV file -----+--> /home/pi/recordings/
+                              |     (manual       |    (saved on SD card)
+                              |      start/stop)  |
                               +------------------+
 
-  ZERO extra CPU cost — same encoded audio goes to both outputs.
-  Uses FFmpeg's "tee" muxer.
+  Streaming is always on. Recording is only when guide presses
+  "Start Recording" on the admin page.
 ```
 
 ### Recording Storage
 
 ```
   /home/pi/recordings/
-  +-- tour_2026-03-31_10-00.ogg    (Morning tour, 45 min, ~3 MB)
-  +-- tour_2026-03-31_14-30.ogg    (Afternoon tour, 60 min, ~4 MB)
-  +-- tour_2026-04-01_10-00.ogg    (Next day morning)
+  +-- tour_2026-04-03_10-15-30.wav   (Morning tour, 45 min, ~82 MB)
+  +-- tour_2026-04-03_14-30-00.wav   (Afternoon tour, 60 min, ~110 MB)
   +-- ...
 
   Storage math:
-  - Opus codec @ 48 kbps = ~360 KB per minute
-  - 1 hour tour  = ~21 MB
-  - 16 GB SD card = ~700 hours of recordings
-  - Auto-cleanup available: delete older than 30 days
+  - PCM 16-bit mono @ 16kHz = ~1.9 MB per minute
+  - 1 hour tour  = ~110 MB
+  - 16 GB SD card = ~140 hours of recordings
+  - Auto-cleanup available: delete older than N days from admin page
 ```
 
-### Auto-Naming
+### Naming & Format
 
-Each time the Pi boots (or streaming restarts), a new file is created with a timestamp:
+Guide presses "Start Recording" → file created with timestamp. Presses "Stop Recording" → WAV header finalized.
 
 ```
-  tour_YYYY-MM-DD_HH-MM.ogg
+  tour_YYYY-MM-DD_HH-MM-SS.wav
 
   Examples:
-  tour_2026-03-31_10-00.ogg   (started at 10:00 AM)
-  tour_2026-03-31_14-30.ogg   (started at 2:30 PM)
+  tour_2026-04-03_10-15-30.wav   (started at 10:15:30 AM)
+  tour_2026-04-03_14-30-00.wav   (started at 2:30 PM)
 ```
 
 ### Retrieving Recordings
@@ -668,8 +663,9 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
 
 ```
   +-----------------------------------+
-  |  Guide Admin Panel                |
-  |  Stream control & recordings      |
+  |  Tour Guide - Admin               |
+  |  Developed by Admin: Rishab       |
+  |  Aggarwal (DPM PC-K)             |
   |                                   |
   |  LIVE STATUS                      |
   |  +------------+ +------------+    |
@@ -679,27 +675,29 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   |                                   |
   |  Stream: * LIVE                   |
   |                                   |
-  |  CURRENT RECORDING                |
+  |  RECORDING CONTROL                |
   |  +-----------------------------+  |
-  |  | o Recording                  | |
-  |  | tour_2026-03-31_14-30.ogg   |  |
+  |  |  [ Start Recording ]        |  |  <-- Manual start/stop
+  |  |  (red pulsing when active)  |  |
+  |  +-----------------------------+  |
+  |                                   |
+  |  TOUR MAP                         |
+  |  +-----------------------------+  |
+  |  |  [Upload Map Image]         |  |  <-- Upload/delete map.jpg
+  |  |  [Delete Map]               |  |
   |  +-----------------------------+  |
   |                                   |
   |  VISITOR QR CODE                  |
   |  +-----------------------------+  |
   |  |        [QR IMAGE]           |  |
   |  |   http://192.168.4.1/       |  |
-  |  |   Print for visitors        |  |
+  |  |   Show to visitors          |  |
   |  +-----------------------------+  |
   |                                   |
   |  PAST RECORDINGS                  |
   |  +-----------------------------+  |
-  |  | tour_2026-03-31_10-00.ogg   |  |
-  |  | 31 Mar, 10:00 | 45 min | 3MB|  |
-  |  | [Download]  [Delete]        |  |
-  |  +-----------------------------+  |
-  |  | tour_2026-03-30_14-30.ogg   |  |
-  |  | 30 Mar, 14:30 | 62 min | 4MB|  |
+  |  | tour_2026-04-03_10-15.wav   |  |
+  |  | 3 Apr, 10:15 | 82 MB       |  |
   |  | [Download]  [Delete]        |  |
   |  +-----------------------------+  |
   |                                   |
@@ -707,14 +705,23 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   +-----------------------------------+
 ```
 
-### Admin API Endpoints
+### Admin API (WebSocket + HTTP)
 
 ```
-  GET /api/status       -> { streaming: true, listeners: 12, current_recording: "..." }
-  GET /api/disk         -> { free_gb: 14.2, total_gb: 15.8 }
-  GET /api/recordings   -> { recordings: [...], count: 5 }
-  GET /api/recordings/delete?file=tour_2026-03-31.ogg  -> { deleted: "..." }
-  GET /api/cleanup?days=30  -> { deleted: [...], count: 2 }
+  WebSocket API (ws://192.168.4.1/ws/status):
+  ============================================
+  { "action": "status"    } -> { streaming, recording, listeners, current_recording }
+  { "action": "start_rec" } -> { recording: true, filename: "tour_..." }
+  { "action": "stop_rec"  } -> { recording: false, saved: "tour_..." }
+  { "action": "disk"      } -> { free_gb, total_gb }
+  { "action": "recordings"} -> { recordings: [...], count: N }
+  { "action": "delete", "file": "tour_..." } -> { deleted: "..." }
+  { "action": "cleanup", "days": 30 }        -> { deleted: [...], count: N }
+
+  HTTP API (http://192.168.4.1/api/):
+  ====================================
+  POST /api/upload-map   (multipart form, field "map") -> { ok: true, size_kb }
+  POST /api/delete-map                                 -> { ok: true }
 ```
 
 ---
@@ -730,7 +737,8 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   [ ]  Charge power bank (full charge night before)
   [ ]  Charge Sennheiser receiver battery
   [ ]  Print QR code cards (laminate for reuse)
-  [ ]  Optional: Update map image on Pi (map.jpg)
+  [ ]  Ensure visitors have earphones/headsets (REQUIRED — no speaker use!)
+  [ ]  Optional: Upload tour map via admin page
 
   SETUP TIME: ~2 MINUTES
   =======================
@@ -754,15 +762,16 @@ You can customize the experience by editing files on the Pi:
 
 ```
   /home/pi/tourguide-web/
-  +-- index.html       <- Visitor landing page (edit tour name, info text)
-  +-- admin.html       <- Guide admin page
-  +-- map.jpg          <- Floor map / route image (add your own)
-  +-- qr.png           <- Auto-generated QR code
+  +-- index.html       <- Visitor page ("Developed by PC-K Department")
+  +-- admin.html       <- Admin page ("Developed by Admin: Rishab Aggarwal (DPM PC-K)")
+  +-- hls.min.js       <- Bundled hls.js library (for Android HLS support)
+  +-- map.jpg          <- Tour map image (uploaded via admin page)
+  +-- qr.png           <- QR code (if generated)
 
-  To customize tour info, SSH into Pi and edit index.html:
-  - Change "Tour Audio Guide" to your venue name
-  - Update the info text with tour details
-  - Add your logo image
+  To customize:
+  - Edit web/index.html on laptop, deploy via SCP or Paramiko
+  - Upload tour map via admin page (no SSH needed)
+  - Credits can be changed in the HTML header sections
 ```
 
 ---
@@ -772,28 +781,38 @@ You can customize the experience by editing files on the Pi:
 | Problem | Solution |
 |---------|----------|
 | No audio from stream | Check aux cable is in MIC IN (pink), not audio out (green) |
-| Audio is distorted/clipping | Lower Sennheiser receiver volume to 50-60% |
+| Audio is distorted/clipping | Lower mic capture: `amixer -c 2 sset Mic capture 5%` then `alsactl store 2` |
+| Echo/voice repeating | Phone speaker feeds back to wireless mic — **use earphones/headset** |
 | Phone can't find "TourGuide" WiFi | Wait 45 sec after powering Pi; check power bank charge |
 | Page doesn't load after WiFi connect | Try http://192.168.4.1/ in browser manually |
-| Audio has long delay (>1s) | Install script uses low-delay Opus — should be ~100-200ms |
-| Pi won't boot | Check power bank supports 5V/3A output, try different Micro-USB cable |
+| Audio has ~3-4s delay | This is normal for HLS. Reduce with HLS_SEGMENT_TIME=1, HLS_LIST_SIZE=2 |
+| Audio stops when app minimized | Make sure using HLS player (not WebSocket). iOS: native HLS. Android: hls.js |
+| Pi won't boot | Check power bank supports 5V/2.5A output, try different Micro-USB cable |
 | Stream cuts out | Power bank may be low; move closer to Pi (within 50m) |
 | "USB sound card not detected" | Unplug and replug USB sound card; check with `arecord -l` |
+| HLS segments not generating | Check `/tmp/tourguide-hls/` ownership: `sudo chown pi:pi /tmp/tourguide-hls` |
 | Captive portal doesn't appear | Different phones handle this differently — share QR code as backup |
 | Recordings not saving | Check SD card space: `df -h` on Pi |
+| Map upload fails | Check nginx `client_max_body_size` is 10m; check `/home/pi/tourguide-web/` writable |
 
 ### Managing the Pi Remotely
 
-While connected to TourGuide WiFi, you can SSH into the Pi:
+SSH into the Pi (via WiFi hotspot or Ethernet):
 
 ```bash
+# Via WiFi hotspot
 ssh pi@192.168.4.1
 
+# Via Ethernet (when Pi connected to router)
+ssh pi@192.168.1.96
+
+# Password: tourguide
+
 # Check stream status
-sudo systemctl status tourguide-stream
+sudo systemctl status tourguide-ws
 
 # Restart stream
-sudo systemctl restart tourguide-stream
+sudo systemctl restart tourguide-ws
 
 # Check recordings
 ls -la /home/pi/recordings/
@@ -802,7 +821,12 @@ ls -la /home/pi/recordings/
 df -h
 
 # View stream logs
-journalctl -u tourguide-stream -f
+journalctl -u tourguide-ws -f
+
+# Check/adjust mic gain
+amixer -c 2 sget Mic      # View current
+amixer -c 2 sset Mic capture 7%  # Adjust
+alsactl store 2            # Persist across reboots
 ```
 
 ---
@@ -849,14 +873,19 @@ journalctl -u tourguide-stream -f
 | Range | ~50m | ~30-50m (sufficient) |
 | Max clients | 10-32 | ~20 (sufficient for tours) |
 
-### Why Icecast + FFmpeg?
+### Why HLS + FFmpeg? (Changed from original Icecast plan)
 
 | Considered | Verdict | Reason |
 |------------|---------|--------|
-| Icecast + FFmpeg | **CHOSEN** | Battle-tested, lightweight, 100+ listeners, low-latency Opus |
+| HLS + FFmpeg | **CHOSEN** | Works in background/lock screen on ALL phones (iOS native, Android via hls.js). ~3-4s latency acceptable for tours |
+| Icecast + FFmpeg | Originally planned | Background playback unreliable on iOS/Android — browser stops audio when minimized |
+| WebSocket + PCM | Tried first | Low latency (~100ms) but no background playback — Web Audio API suspended when tab hidden |
+| MP3 HTTP streaming | Tried | Echo/repetition issues with per-client encoders, Safari double-request bugs |
 | WebRTC | Rejected | Complex setup, overkill for one-way broadcast audio |
 | Bluetooth Broadcast | Rejected | Needs newest phones, ~10m range only |
 | Cloud Streaming | Rejected | Needs internet, per-minute cost, higher latency |
+
+**Key lesson:** Background audio playback on mobile browsers requires `<audio>` element with a standard streaming protocol (HLS). Web Audio API and WebSocket-based approaches are killed by the OS when the browser is backgrounded.
 
 ---
 
@@ -864,25 +893,47 @@ journalctl -u tourguide-stream -f
 
 ```
 TourGuide_Audio_Streamer/
-+-- PLAN.md                  <- This document
++-- PLAN.md                          <- This document
++-- qr_tourguide.png                 <- QR code for visitor page
++-- qr_admin.png                     <- QR code for admin page
++-- qr_card.html                     <- Printable QR card
 +-- setup/
-|   +-- install.sh           <- One-command Pi setup script
+|   +-- install.sh                   <- Pi setup script (hostapd, dnsmasq, deps)
+|   +-- ws_stream_server.py          <- Main server (deployed to Pi)
+|   +-- pi-config/
+|       +-- nginx-tourguide.conf     <- Backup of Pi nginx config
+|       +-- tourguide-ws.service     <- Backup of systemd service file
+|       +-- asound.state             <- Backup of ALSA mixer state
 +-- web/
-|   +-- index.html           <- Visitor landing page (copy to Pi)
-|   +-- admin.html           <- Guide admin page (copy to Pi)
+    +-- index.html                   <- Visitor landing page
+    +-- admin.html                   <- Guide admin page
 ```
 
-### Deploying Web Files to Pi
+### Key Pi Paths
 
-After running `install.sh`, copy the web files:
+```
+/usr/local/bin/tourguide-ws-server.py   <- Server binary (copied from setup/)
+/home/pi/tourguide-web/                  <- Web root (index.html, admin.html, map.jpg, hls.min.js)
+/home/pi/recordings/                     <- Tour recordings (WAV files)
+/tmp/tourguide-hls/                      <- HLS segments (ephemeral, auto-cleaned)
+/etc/nginx/sites-enabled/tourguide       <- Nginx config
+/etc/systemd/system/tourguide-ws.service <- systemd service
+/var/lib/alsa/asound.state               <- ALSA mixer persistence
+```
+
+### Deploying Updates from Laptop
+
+Uses Paramiko SSH/SFTP from Windows to Pi:
 
 ```bash
-# From your laptop (connected to TourGuide WiFi or same network):
-scp web/index.html pi@192.168.4.1:/home/pi/tourguide-web/
-scp web/admin.html pi@192.168.4.1:/home/pi/tourguide-web/
+# Server code: upload to /home/pi/ then sudo cp to /usr/local/bin/
+# Web files: upload directly to /home/pi/tourguide-web/
+# Then: sudo systemctl restart tourguide-ws
 
-# Or if Pi is on your home network during initial setup:
-scp web/*.html pi@raspberrypi.local:/home/pi/tourguide-web/
+# Or manually via SCP:
+scp setup/ws_stream_server.py pi@192.168.1.96:/home/pi/
+ssh pi@192.168.1.96 "sudo cp /home/pi/ws_stream_server.py /usr/local/bin/tourguide-ws-server.py && sudo systemctl restart tourguide-ws"
+scp web/index.html web/admin.html pi@192.168.1.96:/home/pi/tourguide-web/
 ```
 
 ---
@@ -898,4 +949,4 @@ scp web/*.html pi@raspberrypi.local:/home/pi/tourguide-web/
 ---
 
 *Document created: 2026-03-31*
-*Last updated: 2026-03-31*
+*Last updated: 2026-04-07*
