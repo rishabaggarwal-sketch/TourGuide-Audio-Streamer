@@ -890,13 +890,50 @@ alsactl store 2            # Persist across reboots
   Laptop on home WiFi -> SSH to 192.168.1.97 (TP-Link WAN) -> DMZ to Pi
 ```
 
-### Pi Services Disabled (Router Handles These Now)
+### Pi Configuration (for SD Card Recovery)
+
+If the SD card dies, flash Raspberry Pi OS, run `install.sh`, then apply these:
 
 ```bash
-sudo systemctl disable hostapd   # WiFi hotspot -> router
+# 1. Deploy files from laptop repo
+scp setup/ws_stream_server.py pi@<IP>:/home/pi/
+scp setup/pi-config/fix-alsa.sh pi@<IP>:/home/pi/
+scp setup/pi-config/tourguide-ws.service pi@<IP>:/home/pi/
+scp setup/pi-config/nginx-tourguide.conf pi@<IP>:/home/pi/
+scp web/index.html web/admin.html pi@<IP>:/home/pi/tourguide-web/
+# Download hls.min.js from CDN to /home/pi/tourguide-web/
+
+# 2. Install files to system locations
+sudo cp /home/pi/ws_stream_server.py /usr/local/bin/tourguide-ws-server.py
+sudo cp /home/pi/fix-alsa.sh /usr/local/bin/fix-alsa.sh
+sudo chmod +x /usr/local/bin/fix-alsa.sh
+sudo cp /home/pi/tourguide-ws.service /etc/systemd/system/
+sudo cp /home/pi/nginx-tourguide.conf /etc/nginx/sites-enabled/tourguide
+
+# 3. Disable PipeWire (resets ALSA mixer levels to 100%)
+systemctl --user stop pipewire pipewire-pulse pipewire.socket pipewire-pulse.socket
+systemctl --user disable pipewire pipewire-pulse pipewire.socket pipewire-pulse.socket
+systemctl --user mask pipewire pipewire-pulse pipewire.socket pipewire-pulse.socket
+
+# 4. Disable Pi hotspot (router handles WiFi)
+sudo systemctl disable hostapd
 sudo systemctl stop hostapd
-sudo systemctl disable dnsmasq   # DHCP/DNS -> router
+sudo systemctl disable dnsmasq
 sudo systemctl stop dnsmasq
+
+# 5. Set ALSA levels and persist
+amixer -c 2 sset Mic capture 7%
+amixer -c 2 sset Speaker 0% mute
+sudo alsactl store 2
+
+# 6. Add cron safety net for ALSA
+(crontab -l 2>/dev/null; echo "@reboot sleep 15 && /usr/bin/amixer -c 2 sset Mic capture 7% && /usr/bin/amixer -c 2 sset Speaker 0% mute") | crontab -
+
+# 7. Enable and start services
+sudo systemctl daemon-reload
+sudo systemctl enable tourguide-ws
+sudo systemctl start tourguide-ws
+sudo nginx -s reload
 ```
 
 ---
