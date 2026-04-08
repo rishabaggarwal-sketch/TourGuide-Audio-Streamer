@@ -100,7 +100,7 @@ state.Device {
 	control.2 {
 		iface PCM
 		name 'Capture Channel Map'
-		value 2
+		value 0
 		comment {
 			access 'read volatile'
 			type INTEGER
