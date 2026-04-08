@@ -6,7 +6,7 @@ After=network.target alsa-restore.service
 Type=simple
 User=pi
 Environment=PYTHONUNBUFFERED=1
-ExecStartPre=+/usr/sbin/alsactl restore 2
+ExecStartPre=+/bin/bash /usr/local/bin/fix-alsa.sh
 ExecStart=/usr/bin/python3 /usr/local/bin/tourguide-ws-server.py
 Restart=always
 RestartSec=5
