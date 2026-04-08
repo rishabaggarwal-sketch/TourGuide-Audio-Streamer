@@ -551,12 +551,24 @@
             }
         });
 
+        let bufferingTimer = null;
         audio.addEventListener('waiting', () => {
-            if (isPlaying) playerStatus.textContent = 'Buffering...';
+            if (isPlaying) {
+                playerStatus.textContent = 'Buffering...';
+                // Auto-reconnect if buffering for more than 8 seconds
+                if (bufferingTimer) clearTimeout(bufferingTimer);
+                bufferingTimer = setTimeout(() => {
+                    if (isPlaying) {
+                        playerStatus.textContent = 'Reconnecting...';
+                        startAudio();
+                    }
+                }, 8000);
+            }
         });
 
         audio.addEventListener('playing', () => {
             if (isPlaying) playerStatus.textContent = 'Listening...';
+            if (bufferingTimer) { clearTimeout(bufferingTimer); bufferingTimer = null; }
         });
 
         // --- Wake Lock ---

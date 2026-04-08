@@ -375,6 +375,64 @@ async def status_handler(websocket):
                         "deleted": deleted, "count": len(deleted)
                     }))
 
+                elif action == "get_settings":
+                    # Read current ALSA mic capture level
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            "amixer", "-c", "2", "sget", "Mic",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        out, _ = await proc.communicate()
+                        text = out.decode()
+                        # Parse "Capture 2 [7%]"
+                        import re
+                        m = re.search(r"Capture\s+\d+\s+\[(\d+)%\]", text)
+                        mic_pct = int(m.group(1)) if m else -1
+                    except Exception:
+                        mic_pct = -1
+
+                    # CPU temperature
+                    try:
+                        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+                            cpu_temp = round(int(f.read().strip()) / 1000, 1)
+                    except Exception:
+                        cpu_temp = -1
+
+                    # Uptime
+                    try:
+                        with open("/proc/uptime") as f:
+                            uptime_secs = int(float(f.read().split()[0]))
+                        hours, rem = divmod(uptime_secs, 3600)
+                        mins, _ = divmod(rem, 60)
+                        uptime_str = f"{hours}h {mins}m"
+                    except Exception:
+                        uptime_str = "unknown"
+
+                    await websocket.send(json.dumps({
+                        "mic_pct": mic_pct,
+                        "cpu_temp": cpu_temp,
+                        "uptime": uptime_str,
+                    }))
+
+                elif action == "set_mic":
+                    level = req.get("level", 7)
+                    level = max(0, min(100, int(level)))
+                    proc = await asyncio.create_subprocess_exec(
+                        "amixer", "-c", "2", "sset", "Mic", "capture", f"{level}%",
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.communicate()
+                    await websocket.send(json.dumps({"ok": True, "mic_pct": level}))
+
+                elif action == "restart_service":
+                    await websocket.send(json.dumps({"ok": True, "msg": "Restarting..."}))
+                    # Restart after a short delay so the response gets sent
+                    asyncio.get_event_loop().call_later(
+                        1, lambda: os.system("sudo systemctl restart tourguide-ws")
+                    )
+
             except json.JSONDecodeError:
                 pass
     except websockets.exceptions.ConnectionClosed:

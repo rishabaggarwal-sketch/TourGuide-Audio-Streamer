@@ -269,6 +269,46 @@
         </div>
     </div>
 
+    <!-- Settings -->
+    <div class="section">
+        <div class="section-title">Settings</div>
+
+        <!-- Mic Sensitivity -->
+        <div class="stream-card" style="flex-direction: column; align-items: stretch; gap: 0.6rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.85rem; color: #fff;">Mic Sensitivity</span>
+                <span id="micValue" style="font-size: 0.85rem; color: #4ade80; font-family: monospace;">--%</span>
+            </div>
+            <input type="range" id="micSlider" min="0" max="30" value="7"
+                   style="width: 100%; accent-color: #4ade80;"
+                   oninput="document.getElementById('micValue').textContent = this.value + '%'"
+                   onchange="setMic(this.value)">
+            <div style="display: flex; justify-content: space-between; font-size: 0.65rem; color: #6b7394;">
+                <span>0% (silent)</span>
+                <span style="color: #fbbf24;">7% (default)</span>
+                <span>30% (loud)</span>
+            </div>
+        </div>
+
+        <!-- System Info -->
+        <div class="status-grid" style="margin-top: 0.7rem;">
+            <div class="stat-card">
+                <div class="stat-value" id="cpuTemp" style="font-size: 1.2rem;">--</div>
+                <div class="stat-label">CPU Temp</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="uptime" style="font-size: 1.2rem;">--</div>
+                <div class="stat-label">Uptime</div>
+            </div>
+        </div>
+
+        <!-- Restart Service -->
+        <button class="btn-full" onclick="restartService()"
+                style="margin-top: 0.7rem; background: rgba(251,191,36,0.1); color: #fbbf24; border: 1px solid rgba(251,191,36,0.2);">
+            Restart Streaming Service
+        </button>
+    </div>
+
     <!-- Tour Map -->
     <div class="section">
         <div class="section-title">Tour Map</div>
@@ -487,11 +527,48 @@
                 .catch(() => alert('Delete failed'));
         }
 
+        // --- Settings ---
+        function fetchSettings() {
+            wsRequest('get_settings').then(data => {
+                if (data.mic_pct >= 0) {
+                    document.getElementById('micSlider').value = data.mic_pct;
+                    document.getElementById('micValue').textContent = data.mic_pct + '%';
+                }
+                if (data.cpu_temp >= 0) {
+                    const tempEl = document.getElementById('cpuTemp');
+                    tempEl.textContent = data.cpu_temp + '°C';
+                    tempEl.className = 'stat-value ' + (data.cpu_temp > 70 ? 'red' : data.cpu_temp > 55 ? '' : 'green');
+                }
+                if (data.uptime) {
+                    document.getElementById('uptime').textContent = data.uptime;
+                }
+            }).catch(() => {});
+        }
+
+        function setMic(level) {
+            wsRequest('set_mic', {level: parseInt(level)}).then(data => {
+                if (data.ok) {
+                    document.getElementById('micValue').textContent = data.mic_pct + '%';
+                }
+            }).catch(() => alert('Failed to set mic level'));
+        }
+
+        function restartService() {
+            if (!confirm('Restart streaming service? Listeners will be disconnected for ~10 seconds.')) return;
+            wsRequest('restart_service').then(() => {
+                document.getElementById('streamLabel').textContent = 'Restarting...';
+                document.getElementById('streamDot').classList.remove('on');
+                document.getElementById('streamDot').classList.add('off');
+            }).catch(() => alert('Restart failed'));
+        }
+
         // --- Init ---
         fetchStatus();
         fetchRecordings();
+        fetchSettings();
         setInterval(fetchStatus, 5000);
         setInterval(fetchRecordings, 30000);
+        setInterval(fetchSettings, 10000);
     </script>
 </body>
 </html>
