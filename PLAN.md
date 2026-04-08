@@ -659,7 +659,7 @@ Three ways to get your recordings:
 ```
   Option 1: Admin page (easiest)
   ==============================
-  Open http://192.168.4.1/admin.html on guide's phone
+  Open http://192.168.0.16/admin.html on guide's phone
   -> Tap "Download" next to any recording
 
 
@@ -672,7 +672,7 @@ Three ways to get your recordings:
   Option 3: SSH/SFTP (technical)
   ==============================
   From any computer on TourGuide WiFi:
-  scp pi@192.168.4.1:/home/pi/recordings/*.ogg ./
+  scp pi@192.168.0.16:/home/pi/recordings/*.ogg ./
 ```
 
 ---
@@ -681,7 +681,7 @@ Three ways to get your recordings:
 
 ### Guide's Admin Page
 
-The guide accesses `http://192.168.4.1/admin.html` on their phone (while on TourGuide WiFi):
+The guide accesses `http://192.168.0.16/admin.html` on their phone (while on TourGuide WiFi):
 
 ```
   +-----------------------------------+
@@ -712,7 +712,7 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   |  VISITOR QR CODE                  |
   |  +-----------------------------+  |
   |  |        [QR IMAGE]           |  |
-  |  |   http://192.168.4.1/       |  |
+  |  |   http://192.168.0.16/       |  |
   |  |   Show to visitors          |  |
   |  +-----------------------------+  |
   |                                   |
@@ -730,7 +730,7 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
 ### Admin API (WebSocket + HTTP)
 
 ```
-  WebSocket API (ws://192.168.4.1/ws/status):
+  WebSocket API (ws://192.168.0.16/ws/status):
   ============================================
   { "action": "status"    } -> { streaming, recording, listeners, current_recording }
   { "action": "start_rec" } -> { recording: true, filename: "tour_..." }
@@ -740,7 +740,7 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   { "action": "delete", "file": "tour_..." } -> { deleted: "..." }
   { "action": "cleanup", "days": 30 }        -> { deleted: [...], count: N }
 
-  HTTP API (http://192.168.4.1/api/):
+  HTTP API (http://192.168.0.16/api/):
   ====================================
   POST /api/upload-map   (multipart form, field "map") -> { ok: true, size_kb }
   POST /api/delete-map                                 -> { ok: true }
@@ -771,7 +771,7 @@ The guide accesses `http://192.168.4.1/admin.html` on their phone (while on Tour
   4. Wait for Pi to boot + stream starts          [~45 sec]
   5. Test on your phone:                          [30 sec]
      - Connect to "TourGuide" WiFi
-     - Open http://192.168.4.1/
+     - Open http://192.168.0.16/
      - Tap Play -> hear speaker
   6. Hand out QR code cards to visitors           [Ready!]
 
@@ -806,7 +806,7 @@ You can customize the experience by editing files on the Pi:
 | Audio is distorted/clipping | Lower mic capture: `amixer -c 2 sset Mic capture 5%` then `alsactl store 2` |
 | Echo/voice repeating | Phone speaker feeds back to wireless mic — **use earphones/headset** |
 | Phone can't find "TourGuide" WiFi | Wait 45 sec after powering Pi; check power bank charge |
-| Page doesn't load after WiFi connect | Try http://192.168.4.1/ in browser manually |
+| Page doesn't load after WiFi connect | Try http://192.168.0.16/ in browser manually |
 | Audio has ~3-4s delay | This is normal for HLS. Reduce with HLS_SEGMENT_TIME=1, HLS_LIST_SIZE=2 |
 | Audio stops when app minimized | Make sure using HLS player (not WebSocket). iOS: native HLS. Android: hls.js |
 | Pi won't boot | Check power bank supports 5V/2.5A output, try different Micro-USB cable |
