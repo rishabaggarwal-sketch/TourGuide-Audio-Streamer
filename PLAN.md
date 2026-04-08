@@ -93,7 +93,7 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
 
 ## 2. Hardware Shopping List
 
-### Only 4 Items Needed (+ 1 Sennheiser receiver from your stock)
+### 5 Items Needed (+ 1 Sennheiser receiver from your stock)
 
 ```
 +-----+----------------------------+----------+---------------------+
@@ -102,25 +102,31 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
 |  1  | Raspberry Pi 3 Model B+   | Rs 3,500 | Amazon/Robu.in      |
 |     | + MicroSD Card (128GB)    | Rs   800 |                     |
 +-----+----------------------------+----------+---------------------+
-|  2  | USB Sound Card             | Rs   350 | Amazon              |
+|  2  | TP-Link TL-WR1502X        | Rs 3,500 | Amazon              |
+|     | WiFi 6 Travel Router       |          | (USB-C powered,     |
+|     | (AX1500, dual-band)        |          |  shares power bank) |
++-----+----------------------------+----------+---------------------+
+|  3  | USB Sound Card             | Rs   350 | Amazon              |
 |     | (with mic-in / line-in)    |          | Search: "USB sound  |
 |     |                            |          |  card mic input"    |
 +-----+----------------------------+----------+---------------------+
-|  3  | 3.5mm Male-to-Male         | Rs   100 | Amazon/local        |
+|  4  | 3.5mm Male-to-Male         | Rs   100 | Amazon/local        |
 |     | Aux Cable                  |          |                     |
 +-----+----------------------------+----------+---------------------+
-|  4  | Power Bank (10000mAh+)    | Rs   800 | Amazon              |
-|     | Must support 5V/3A output  |          | (for Pi 4)          |
+|  5  | Power Bank (10000mAh+)    | Rs   800 | Amazon              |
+|     | Must have USB-C + MicroUSB |          | (powers Pi + Router)|
 +-----+----------------------------+----------+---------------------+
-|     | Micro-USB cable for Pi     | Rs   100 | (you likely have one)|
+|     | Ethernet cable (short)     | Rs   100 | (Pi to Router)      |
+|     | Micro-USB cable for Pi     | Rs   100 | (you likely have)   |
 |     | Small carrying pouch       | Rs   200 | Amazon/local        |
 +-----+----------------------------+----------+---------------------+
-|     | TOTAL                      |~Rs 5,550 |                     |
+|     | TOTAL                      |~Rs 9,450 |                     |
 +-----+----------------------------+----------+---------------------+
 
   + 1 Sennheiser receiver (from your existing stock)
 
-  NOTE: No separate WiFi router needed! Pi creates its own hotspot.
+  NOTE: TP-Link router handles WiFi (better range, less Pi heat).
+  Pi connects to router via Ethernet — hostapd disabled on Pi.
 ```
 
 ### Component Details
@@ -229,22 +235,25 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
   |   |   channel]    |                    |                    |
   |   +---------------+             +------+-------+            |
   |                                 |              |            |
-  |   +---------------+    Micro-USB    | Raspberry    |            |
-  |   |  Power Bank   |----cable-->| Pi 4         |            |
+  |   +---------------+ Micro-USB   | Raspberry    |            |
+  |   |  Power Bank   |---cable---->| Pi 3B+       |            |
   |   |  10000 mAh    |  (power)   |              |            |
   |   |               |            | Running:     |            |
-  |   |  [Powers Pi   |            | - WiFi Hotspot            |
-  |   |   for 4-6hr]  |            | - HLS Stream |            |
-  |   +---------------+            | - FFmpeg x2  |            |
-  |                                 | - Admin API  |            |
-  |                                 | - Web Server |            |
-  |                                 +--------------+            |
-  |                                        |                    |
-  |                              WiFi Hotspot Signal            |
-  |                              SSID: "TourGuide"             |
-  |                              Pass: "listen123"             |
+  |   |  [Powers Pi   | USB-C      | - HLS Stream |            |
+  |   |   + Router]   |---cable--->| - FFmpeg x2  |            |
+  |   +---------------+            | - Admin API  |            |
+  |                                | - Web Server |            |
+  |   +---------------+ Ethernet   +------+-------+            |
+  |   | TP-Link       |---cable--------->|                     |
+  |   | TL-WR1502X    |            (Pi Ethernet to             |
+  |   | WiFi 6 Router |             Router LAN port)           |
+  |   | (USB-C power) |                                        |
+  |   +-------+-------+                                        |
+  |           | WiFi Signal                                     |
+  |           | SSID: "TourGuide"                               |
+  |           | Pass: "listen123"                               |
   +--------------------------------------------------------------+
-                                       |
+                    |
                     +------------------+------------------+
                     |                  |                  |
               +-----+-----+    +------+----+    +--------+--+
@@ -298,7 +307,7 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
   |        |                    | ~45sec |
   +--------+                    +--------+
 
-  Pi auto-creates WiFi hotspot + starts streaming on boot.
+  Pi starts streaming on boot. Router provides WiFi.
 
 
   STEP 4: Verify
@@ -306,7 +315,7 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
 
   On your phone:
   1. Connect to WiFi "TourGuide" (pass: listen123)
-  2. Open browser: http://192.168.4.1/
+  2. Open browser: http://192.168.0.16/
   3. Tap Play -> you should hear the speaker
 ```
 
@@ -319,24 +328,28 @@ Step 5: Visitors scan QR code -> browser opens -> tap Play -> listen!
   |          belt pouch / fanny pack)       |
   |                                         |
   |  +-------------+  +-------------+      |
-  |  | Raspberry   |  | Power Bank  |      |
-  |  | Pi 4        |  | 10000mAh    |      |
-  |  | + USB Sound |  |             |      |
-  |  |   Card      |  |             |      |
+  |  | Raspberry   |  | TP-Link     |      |
+  |  | Pi 3B+      |  | TL-WR1502X  |      |
+  |  | + USB Sound |  | (WiFi 6)    |      |
+  |  |   Card      |  +-------------+      |
+  |  +------+------+        |              |
+  |         | Ethernet cable |              |
+  |         +----------------+              |
+  |                                         |
   |  +-------------+  +-------------+      |
+  |  | Sennheiser  |  | Power Bank  |      |
+  |  | Receiver    |  | 10000mAh    |      |
+  |  +-------------+  | (USB-C->Rtr)|      |
+  |                    | (MicroUSB-> |      |
+  |   Aux cable from   |  Pi)        |      |
+  |   receiver to Pi   +-------------+      |
   |                                         |
-  |  +-------------+                        |
-  |  | Sennheiser  |   Aux cable connects   |
-  |  | Receiver    |   receiver to Pi       |
-  |  +-------------+                        |
-  |                                         |
-  |  Total Size: ~15cm x 12cm x 5cm        |
-  |  Total Weight: ~400 grams              |
+  |  Total Weight: ~500 grams              |
   |  Battery Life: 4-6 hours               |
   +-----------------------------------------+
 
   Can be carried by guide or placed on a table.
-  WiFi range: ~30-50 meters indoors.
+  WiFi range: ~50-100 meters indoors (WiFi 6 router).
 ```
 
 ---
@@ -400,49 +413,58 @@ The original plan called for Icecast, but HLS was chosen instead for reliable ba
   +---------------------+--------+--------------------------------------------+
   | Service             | Port   | Purpose                                    |
   +---------------------+--------+--------------------------------------------+
-  | hostapd             | -      | WiFi hotspot "TourGuide"                   |
-  | dnsmasq             | 53     | DHCP + DNS for connected phones            |
   | tourguide-ws        | 8765   | WebSocket server (audio + admin API)       |
   |                     | 8766   | HTTP server (HLS segments + map API)       |
   | nginx               | 80     | Reverse proxy + web files                  |
   +---------------------+--------+--------------------------------------------+
+  | hostapd             | -      | DISABLED (router handles WiFi now)         |
+  | dnsmasq             | 53     | DISABLED (router handles DHCP now)         |
+  +---------------------+--------+--------------------------------------------+
 
   systemd service: tourguide-ws (auto-starts on boot, auto-restarts on failure)
+  ExecStartPre: fix-alsa.sh (waits 2s, forces mic 7% + speaker mute)
   Server binary: /usr/local/bin/tourguide-ws-server.py
 ```
 
 ### Network Architecture
 
 ```
-  +--------------------------------------------------+
-  |           RASPBERRY PI                            |
-  |  WiFi Hotspot: 192.168.4.1 (TourGuide/listen123) |
-  |  Ethernet:     192.168.1.96 (for SSH from laptop) |
-  |                                                   |
-  |  +--------+  +------------------+  +--------+    |
-  |  |hostapd |  | tourguide-ws     |  | nginx  |    |
-  |  |WiFi AP |  | :8765 (WS)      |  |  :80   |    |
-  |  |        |  | :8766 (HTTP/HLS) |  |        |    |
-  |  +--------+  +--------+---------+  +---+----+    |
-  |                        |               |          |
-  +--------------------------------------------------+
-                           |               |
-                   +-------+---------------+
-                   |
-           Visitor's Phone (192.168.4.x)
-           +-------------------------------+
-           | Browser: http://192.168.4.1/  |
-           |                               |
-           |  nginx routes:                |
-           |  /         -> static web files|
-           |  /ws       -> WS audio :8765  |
-           |  /ws/status-> WS admin :8765  |
-           |  /hls/     -> HLS segs :8766  |
-           |  /api/     -> HTTP API :8766  |
-           |  /recordings/ -> file listing |
-           +-------------------------------+
+  +------------------------------------------------------------------+
+  |                                                                  |
+  |  TP-Link TL-WR1502X (Router)       RASPBERRY PI 3B+             |
+  |  LAN IP: 192.168.0.1               IP: 192.168.0.16 (reserved)  |
+  |  SSID: TourGuide / listen123       hostapd: DISABLED            |
+  |  DHCP: 192.168.0.2 - 253           dnsmasq: DISABLED            |
+  |  DMZ: 192.168.0.16 (Pi)                                         |
+  |                                     +------------------+        |
+  |  +--------+    Ethernet (LAN)       | tourguide-ws     |        |
+  |  | TP-Link|------------------------>| :8765 (WS)       |        |
+  |  | LAN    |                         | :8766 (HTTP/HLS) |        |
+  |  +--------+                         +--------+---------+        |
+  |  | TP-Link|    Ethernet (WAN)                 |                  |
+  |  | WAN    |<--- Home Router         +--------+---------+        |
+  |  +--------+    (for laptop SSH)     |     nginx :80    |        |
+  |  WAN IP: 192.168.1.97              +------------------+        |
+  |                                                                  |
+  +------------------------------------------------------------------+
+         |  WiFi                              |
+         |                            +-------+---------------+
+         |                            |
+  Visitor's Phone (192.168.0.x)       Laptop (via 192.168.1.97)
+  +-------------------------------+   +---------------------------+
+  | Browser: http://192.168.0.16/ |   | SSH: pi@192.168.1.97     |
+  |                               |   | (through TP-Link DMZ)    |
+  |  nginx routes:                |   +---------------------------+
+  |  /         -> static web files|
+  |  /ws       -> WS audio :8765  |
+  |  /ws/status-> WS admin :8765  |
+  |  /hls/     -> HLS segments    |
+  |  /api/     -> HTTP API :8766  |
+  |  /recordings/ -> file listing |
+  +-------------------------------+
 
-  EVERYTHING IS LOCAL. NO INTERNET NEEDED.
+  Tour operation: NO INTERNET NEEDED. Only Pi + Router + Power Bank.
+  Laptop SSH: requires TP-Link WAN connected to home router.
 ```
 
 ### ALSA Audio Settings (Persisted)
@@ -797,14 +819,15 @@ You can customize the experience by editing files on the Pi:
 
 ### Managing the Pi Remotely
 
-SSH into the Pi (via WiFi hotspot or Ethernet):
+SSH into the Pi:
 
 ```bash
-# Via WiFi hotspot
-ssh pi@192.168.4.1
+# From phone/laptop on TourGuide WiFi (direct)
+ssh pi@192.168.0.16
 
-# Via Ethernet (when Pi connected to router)
-ssh pi@192.168.1.96
+# From laptop on home WiFi (through TP-Link DMZ)
+# Requires TP-Link WAN connected to home router
+ssh pi@192.168.1.97
 
 # Password: tourguide
 
@@ -831,7 +854,54 @@ alsactl store 2            # Persist across reboots
 
 ---
 
-## 10. Reference Links
+## 10. TP-Link Router Configuration
+
+### Router: TP-Link TL-WR1502X (AX1500 WiFi 6)
+
+**Why external router?** Pi 3B+ onboard WiFi running hostapd causes significant heating after 2+ hours. Dedicated router is cooler, has better range, handles more clients.
+
+### Router Settings
+
+| Setting | Value |
+|---------|-------|
+| Mode | Router |
+| SSID (2.4 GHz) | TourGuide |
+| Password | listen123 |
+| Security | WPA2-PSK |
+| 5 GHz | Off (2.4 GHz has better range for tours) |
+| LAN IP | 192.168.0.1 |
+| DHCP Range | 192.168.0.2 - 192.168.0.253 |
+| DHCP Reservation | MAC `b8:27:eb:94:ab:6d` → `192.168.0.16` (Pi) |
+| DMZ | 192.168.0.16 (Pi — for laptop SSH via WAN) |
+| AP Isolation | OFF (phones must reach Pi on LAN) |
+| Band Steering | OFF |
+
+### Cabling
+
+```
+  For tours (no internet needed):
+  Power Bank --USB-C--> TP-Link Router
+  Power Bank --MicroUSB--> Raspberry Pi
+  TP-Link LAN port --Ethernet--> Pi Ethernet port
+
+  For development (laptop SSH access):
+  Home Router LAN --Ethernet--> TP-Link WAN port
+  TP-Link LAN port --Ethernet--> Pi Ethernet port
+  Laptop on home WiFi -> SSH to 192.168.1.97 (TP-Link WAN) -> DMZ to Pi
+```
+
+### Pi Services Disabled (Router Handles These Now)
+
+```bash
+sudo systemctl disable hostapd   # WiFi hotspot -> router
+sudo systemctl stop hostapd
+sudo systemctl disable dnsmasq   # DHCP/DNS -> router
+sudo systemctl stop dnsmasq
+```
+
+---
+
+## 11. Reference Links
 
 ### Hardware Guides
 - [USB Audio Cards with Raspberry Pi (Adafruit)](https://learn.adafruit.com/usb-audio-cards-with-a-raspberry-pi)
@@ -862,16 +932,19 @@ alsactl store 2            # Persist across reboots
 | Maintenance | SDK updates, store accounts | Zero maintenance |
 | Offline | Must pre-install | Works (local WiFi, no internet) |
 
-### Why Pi as Hotspot (not separate router)?
+### Why External Router (not Pi as Hotspot)?
 
-| Factor | Separate Router | Pi as Hotspot |
-|--------|----------------|---------------|
-| Devices to carry | 5 | 4 (one less!) |
-| Cost | +Rs 1,200 | Free (built-in WiFi) |
-| Setup complexity | Configure two devices | One device does everything |
-| Failure points | Router battery, connection | Just the Pi |
-| Range | ~50m | ~30-50m (sufficient) |
-| Max clients | 10-32 | ~20 (sufficient for tours) |
+Originally planned Pi as hotspot, but switched to TP-Link TL-WR1502X after Pi heating issues.
+
+| Factor | Pi as Hotspot (original) | TP-Link Router (current) |
+|--------|--------------------------|--------------------------|
+| Pi temperature | Hot after 2hrs (hostapd) | Cool (WiFi offloaded) |
+| WiFi range | ~30-50m (Pi onboard) | ~50-100m (WiFi 6 AX1500) |
+| Max clients | ~20 | 30+ |
+| Devices to carry | 4 | 5 (one more device) |
+| Cost | Free | +Rs 3,500 |
+| Power | Single power bank | Shared power bank (USB-C + MicroUSB) |
+| Stability | Pi WiFi can be flaky | Dedicated router hardware |
 
 ### Why HLS + FFmpeg? (Changed from original Icecast plan)
 
@@ -903,6 +976,7 @@ TourGuide_Audio_Streamer/
 |   +-- pi-config/
 |       +-- nginx-tourguide.conf     <- Backup of Pi nginx config
 |       +-- tourguide-ws.service     <- Backup of systemd service file
+|       +-- fix-alsa.sh              <- ALSA init script (mic 7%, speaker mute)
 |       +-- asound.state             <- Backup of ALSA mixer state
 +-- web/
     +-- index.html                   <- Visitor landing page
@@ -913,6 +987,7 @@ TourGuide_Audio_Streamer/
 
 ```
 /usr/local/bin/tourguide-ws-server.py   <- Server binary (copied from setup/)
+/usr/local/bin/fix-alsa.sh              <- ALSA init script (runs before server)
 /home/pi/tourguide-web/                  <- Web root (index.html, admin.html, map.jpg, hls.min.js)
 /home/pi/recordings/                     <- Tour recordings (WAV files)
 /tmp/tourguide-hls/                      <- HLS segments (ephemeral, auto-cleaned)
@@ -930,10 +1005,10 @@ Uses Paramiko SSH/SFTP from Windows to Pi:
 # Web files: upload directly to /home/pi/tourguide-web/
 # Then: sudo systemctl restart tourguide-ws
 
-# Or manually via SCP:
-scp setup/ws_stream_server.py pi@192.168.1.96:/home/pi/
-ssh pi@192.168.1.96 "sudo cp /home/pi/ws_stream_server.py /usr/local/bin/tourguide-ws-server.py && sudo systemctl restart tourguide-ws"
-scp web/index.html web/admin.html pi@192.168.1.96:/home/pi/tourguide-web/
+# Or manually via SCP (through TP-Link DMZ, from home network):
+scp setup/ws_stream_server.py pi@192.168.1.97:/home/pi/
+ssh pi@192.168.1.97 "sudo cp /home/pi/ws_stream_server.py /usr/local/bin/tourguide-ws-server.py && sudo systemctl restart tourguide-ws"
+scp web/index.html web/admin.html pi@192.168.1.97:/home/pi/tourguide-web/
 ```
 
 ---
@@ -949,4 +1024,4 @@ scp web/index.html web/admin.html pi@192.168.1.96:/home/pi/tourguide-web/
 ---
 
 *Document created: 2026-03-31*
-*Last updated: 2026-04-07*
+*Last updated: 2026-04-08*
