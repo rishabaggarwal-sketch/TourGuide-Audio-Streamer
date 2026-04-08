@@ -1,13 +1,13 @@
 [Unit]
 Description=Tour Guide WebSocket Audio Server
-After=network.target alsa-restore.service
+After=network.target
 
 [Service]
 Type=simple
 User=pi
 Environment=PYTHONUNBUFFERED=1
-ExecStartPre=+/bin/bash /usr/local/bin/fix-alsa.sh
 ExecStart=/usr/bin/python3 /usr/local/bin/tourguide-ws-server.py
+ExecStartPost=+/bin/bash /usr/local/bin/fix-alsa.sh
 Restart=always
 RestartSec=5
 StandardOutput=journal
